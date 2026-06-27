@@ -1,0 +1,37 @@
+name: Feature Request
+description: Propose a new feature or user-facing enhancement.
+title: "[Feature] "
+labels:
+  - feature
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or product problem does this solve?
+      placeholder: Describe the pain point or missing capability.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: What should the feature do?
+      placeholder: Describe the expected behavior or UX.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Other approaches you considered.
+      placeholder: Simpler approach, tradeoffs, rejected options...
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Expected Impact
+      description: Which layer or users will this affect?
+      placeholder: Desktop only, server API, shared core, docs, onboarding...

@@ -1,0 +1,41 @@
+name: Task
+description: Track a concrete implementation task.
+title: "[Task] "
+labels:
+  - task
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to be done?
+      placeholder: Describe the task in one or two sentences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which areas are affected?
+      placeholder: apps/desktop, apps/server, crates/frilday-core, docs...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What should be true when this task is done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Extra context, references, or dependencies.
+      placeholder: Related issues, risks, implementation notes...

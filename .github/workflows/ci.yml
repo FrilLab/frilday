@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  desktop:
+    name: Desktop Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint desktop app
+        run: npm run lint
+
+      - name: Build desktop app
+        run: npm run build
+
+  rust:
+    name: Rust Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check server crate
+        run: cargo check --manifest-path apps/server/Cargo.toml
+
+      - name: Check core crate
+        run: cargo check --manifest-path crates/frilday-core/Cargo.toml
