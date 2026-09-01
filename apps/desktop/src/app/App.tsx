@@ -89,7 +89,7 @@ export default function App() {
                 completions={m.completions}
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
-                runningTaskIdToday={m.runningTaskIdToday}
+                runningTaskId={m.runningTaskId}
                 getMemoText={m.getMemoText}
                 onSaveMemo={m.handleSaveDailyMemo}
                 onToggleToday={(task: Task) =>
@@ -126,7 +126,7 @@ export default function App() {
                 onError={m.setError}
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
-                runningTaskIdToday={m.runningTaskIdToday}
+                runningTaskId={m.runningTaskId}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
               />

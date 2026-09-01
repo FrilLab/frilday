@@ -12,6 +12,10 @@ export interface AutoStopResult {
   }>;
 }
 
+export function getRunningTaskId(entries: TimeEntry[]): string | null {
+  return entries.find((entry) => entry.endedAt == null)?.taskId ?? null;
+}
+
 // (role: close every active entry at one timestamp, type: (TimeEntry[], string)=>TimeEntry[])
 export function closeRunningEntries(
   entries: TimeEntry[],

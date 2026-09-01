@@ -55,7 +55,7 @@ export function TodayPage(props: {
   timeEntries: TimeEntry[]; // (role: time tracking logs, type: TimeEntry[])
 
   nowIso: string; // (role: ui clock iso, type: string)
-  runningTaskIdToday: string | null; // (role: single running task id, type: string | null)
+  runningTaskId: string | null; // (role: single running task id, type: string | null)
 
   getMemoText: (taskId: string, date: string) => string;
   onSaveMemo: (input: { taskId: string; date: string; text: string }) => void;
@@ -78,7 +78,7 @@ export function TodayPage(props: {
     completions,
     timeEntries,
     nowIso,
-    runningTaskIdToday,
+    runningTaskId,
     getMemoText,
     onSaveMemo,
     onToggleToday,
@@ -233,7 +233,7 @@ export function TodayPage(props: {
             todayYmd={todayYmd}
             todayDow={todayDow}
             nowIso={nowIso}
-            runningTaskIdToday={runningTaskIdToday}
+            runningTaskId={runningTaskId}
             getMemoText={getMemoText}
             onSaveMemo={onSaveMemo}
             onToggleToday={onToggleToday}

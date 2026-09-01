@@ -1,9 +1,16 @@
 import { isTauri } from './runtime';
+import { invoke } from '@tauri-apps/api/core';
+
+export type SqlStatement = {
+  sql: string;
+  bind: unknown[];
+};
 
 export type AppDb = {
   init(): Promise<void>;
   execute(sql: string, bind?: unknown[]): Promise<void>;
   select<T>(sql: string, bind?: unknown[]): Promise<T[]>;
+  executeTransaction(statements: SqlStatement[]): Promise<void>;
 };
 
 // Keep the existing database filename; changing it would bypass the native migration.
@@ -129,8 +136,15 @@ async function select<T>(sql: string, bind: unknown[] = []): Promise<T[]> {
   return db.select<T[]>(sql, bind);
 }
 
+async function executeTransaction(statements: SqlStatement[]): Promise<void> {
+  if (!isTauri()) return;
+
+  await invoke('execute_app_transaction', { statements });
+}
+
 export const appDb: AppDb = {
   init,
   execute,
   select,
+  executeTransaction,
 };

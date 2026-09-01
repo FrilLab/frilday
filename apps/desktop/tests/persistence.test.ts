@@ -8,10 +8,13 @@ type FakeStorage = {
 
 const storageValues = new Map<string, string>();
 const executedSql: string[] = [];
+const transactions: string[][] = [];
 let migrationMarker = '0';
 let failWrites = false;
 let openTransactions = 0;
 let maxOpenTransactions = 0;
+let committedTransactions = 0;
+let rolledBackTransactions = 0;
 
 const fakeStorage: FakeStorage = {
   getItem: (key) => storageValues.get(key) ?? null,
@@ -23,18 +26,32 @@ const fakeAppDb = {
   init: async () => undefined,
   execute: async (sql: string) => {
     executedSql.push(sql.trim());
-    if (sql.trim() === 'BEGIN TRANSACTION') {
-      openTransactions += 1;
-      maxOpenTransactions = Math.max(maxOpenTransactions, openTransactions);
-    }
-    if (failWrites && sql.includes('INSERT INTO tasks')) {
-      throw new Error('simulated write failure');
-    }
     if (sql.includes('INSERT INTO app_meta')) migrationMarker = '1';
-    if (sql.trim() === 'COMMIT' || sql.trim() === 'ROLLBACK') {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  },
+  executeTransaction: async (
+    statements: Array<{ sql: string; bind: unknown[] }>,
+  ) => {
+    const sqlStatements = statements.map(({ sql }) => sql.trim());
+    transactions.push(sqlStatements);
+    openTransactions += 1;
+    maxOpenTransactions = Math.max(maxOpenTransactions, openTransactions);
+
+    try {
+      for (const sql of sqlStatements) {
+        executedSql.push(sql);
+        if (failWrites && sql.includes('INSERT INTO tasks')) {
+          throw new Error('simulated write failure');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      committedTransactions += 1;
+    } catch (error) {
+      rolledBackTransactions += 1;
+      throw error;
+    } finally {
       openTransactions -= 1;
     }
-    await new Promise((resolve) => setTimeout(resolve, 0));
   },
   select: async <T>(sql: string): Promise<T[]> => {
     if (sql.includes('SELECT value FROM app_meta')) {
@@ -79,10 +96,13 @@ describe('SQLite persistence safety', () => {
   beforeEach(() => {
     storageValues.clear();
     executedSql.length = 0;
+    transactions.length = 0;
     migrationMarker = '0';
     failWrites = false;
     openTransactions = 0;
     maxOpenTransactions = 0;
+    committedTransactions = 0;
+    rolledBackTransactions = 0;
   });
 
   test('migrates valid legacy data before removing legacy keys', async () => {
@@ -95,8 +115,11 @@ describe('SQLite persistence safety', () => {
 
     expect(data.tasks).toEqual([]);
     expect(storageValues.has('dailycheck.tasks.v2')).toBe(false);
-    expect(executedSql).toContain('BEGIN TRANSACTION');
-    expect(executedSql).toContain('COMMIT');
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]).toContain('DELETE FROM tasks');
+    expect(transactions[0].some((sql) => sql.includes('INSERT INTO tasks'))).toBe(
+      true,
+    );
 
     const callsAfterFirstLoad = executedSql.length;
     await loadAppData();
@@ -120,15 +143,15 @@ describe('SQLite persistence safety', () => {
       taskDailyMemos: [],
     });
 
-    expect(executedSql).toEqual([
-      'INSERT INTO app_meta (key, value)\n      VALUES (?, ?)\n      ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      'BEGIN TRANSACTION',
-      'DELETE FROM tasks',
-      'DELETE FROM completions',
-      'DELETE FROM time_entries',
-      'DELETE FROM task_daily_memos',
-      'COMMIT',
+    expect(transactions).toEqual([
+      [
+        'DELETE FROM tasks',
+        'DELETE FROM completions',
+        'DELETE FROM time_entries',
+        'DELETE FROM task_daily_memos',
+      ],
     ]);
+    expect(committedTransactions).toBe(1);
   });
 
   test('rolls back when a snapshot write fails', async () => {
@@ -143,9 +166,9 @@ describe('SQLite persistence safety', () => {
       }),
     ).rejects.toThrow('simulated write failure');
 
-    expect(executedSql).toContain('BEGIN TRANSACTION');
-    expect(executedSql).toContain('ROLLBACK');
-    expect(executedSql).not.toContain('COMMIT');
+    expect(transactions).toHaveLength(1);
+    expect(rolledBackTransactions).toBe(1);
+    expect(committedTransactions).toBe(0);
   });
 
   test('serializes concurrent snapshot saves', async () => {

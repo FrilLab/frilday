@@ -5,6 +5,7 @@ import { pickWeeklySlots } from '../src/domain/schedule/scheduleLimit';
 import {
   autoStopEntriesAtTarget,
   closeRunningEntries,
+  getRunningTaskId,
 } from '../src/domain/timeTracking/timer';
 import {
   getTrackedMinutes,
@@ -86,6 +87,21 @@ describe('time and schedule domain contracts', () => {
         minutes: 30,
       },
     ]);
+  });
+
+  test('keeps a prior-day running task controllable after midnight', () => {
+    expect(
+      getRunningTaskId([
+        {
+          id: 'entry-1',
+          taskId: 'task-1',
+          date: '2026-01-05',
+          startedAt: '2026-01-05T23:50:00.000Z',
+          endedAt: null,
+          minutes: 0,
+        },
+      ]),
+    ).toBe('task-1');
   });
 
   test('keeps actual tracked time independent from completion and planned time', () => {

@@ -9,6 +9,7 @@ import type { CreateTaskInput } from '../../features/task/components/TaskForm';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
 import { isVisibleInWeek } from '../../domain/schedule/scheduleLimit';
+import { getRunningTaskId } from '../../domain/timeTracking/timer';
 
 export function useAppModel() {
   const {
@@ -60,14 +61,11 @@ export function useAppModel() {
   const todayDow = dayOfWeek(today);
   const weekStartYmd = toYmd(startOfWeekMonday(today));
 
-  // Single running timer (today). Store enforces 1 running entry per day.
-  // (role: single running task id for today, type: string | null)
-  const runningTaskIdToday = useMemo(() => {
-    const running = timeEntries.find(
-      (e) => e.date === todayYmd && e.endedAt == null,
-    );
-    return running?.taskId ?? null;
-  }, [timeEntries, todayYmd]);
+  // Single running timer. Keep entries started before midnight controllable.
+  // (role: single running task id, type: string | null)
+  const runningTaskId = useMemo(() => {
+    return getRunningTaskId(timeEntries);
+  }, [timeEntries]);
 
   const weekStats = useMemo(
     () => calcWeekStats(tasks, completions, weekStartYmd),
@@ -222,7 +220,7 @@ export function useAppModel() {
     todayYmd,
     todayDow,
     nowIso,
-    runningTaskIdToday,
+    runningTaskId,
 
     // view state
     tab,

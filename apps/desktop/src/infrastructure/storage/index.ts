@@ -11,7 +11,7 @@ import type {
   TaskDailyMemo,
   TimeEntry,
 } from '../../shared/types';
-import { appDb } from '../tauri/db';
+import { appDb, type SqlStatement } from '../tauri/db';
 import { isTauri } from '../tauri/runtime';
 
 // These keys are persisted data identifiers. Keep them stable unless an
@@ -201,103 +201,120 @@ async function hasExistingData(): Promise<boolean> {
   );
 }
 
-async function replaceTasks(tasks: Task[]): Promise<void> {
-  await appDb.execute('DELETE FROM tasks');
-
-  for (const task of tasks) {
-    await appDb.execute(
-      `
-        INSERT INTO tasks (
-          id,
-          title,
-          description,
-          category,
-          days_of_week,
-          duration_minutes,
-          start_ymd,
-          auto_archive_after,
-          repeat_count,
-          is_active,
-          created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        task.id,
-        task.title,
-        task.description,
-        task.category,
-        JSON.stringify(task.daysOfWeek),
-        task.durationMinutes,
-        task.startYmd ?? null,
-        task.autoArchiveAfter ?? null,
-        task.repeatCount ?? null,
-        task.isActive ? 1 : 0,
-        task.createdAt,
-      ],
-    );
-  }
+function statement(sql: string, bind: unknown[] = []): SqlStatement {
+  return { sql, bind };
 }
 
-async function replaceCompletions(completions: Completion[]): Promise<void> {
-  await appDb.execute('DELETE FROM completions');
-
-  for (const completion of completions) {
-    await appDb.execute(
-      'INSERT INTO completions (task_id, date) VALUES (?, ?)',
-      [completion.taskId, completion.date],
-    );
-  }
+function buildTaskStatements(tasks: Task[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM tasks'),
+    ...tasks.map((task) =>
+      statement(
+        `
+          INSERT INTO tasks (
+            id,
+            title,
+            description,
+            category,
+            days_of_week,
+            duration_minutes,
+            start_ymd,
+            auto_archive_after,
+            repeat_count,
+            is_active,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          task.id,
+          task.title,
+          task.description,
+          task.category,
+          JSON.stringify(task.daysOfWeek),
+          task.durationMinutes,
+          task.startYmd ?? null,
+          task.autoArchiveAfter ?? null,
+          task.repeatCount ?? null,
+          task.isActive ? 1 : 0,
+          task.createdAt,
+        ],
+      ),
+    ),
+  ];
 }
 
-async function replaceTimeEntries(timeEntries: TimeEntry[]): Promise<void> {
-  await appDb.execute('DELETE FROM time_entries');
-
-  for (const entry of timeEntries) {
-    await appDb.execute(
-      `
-        INSERT INTO time_entries (
-          id,
-          task_id,
-          date,
-          started_at,
-          ended_at,
-          minutes
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [
-        entry.id,
-        entry.taskId,
-        entry.date,
-        entry.startedAt,
-        entry.endedAt,
-        entry.minutes,
-      ],
-    );
-  }
+function buildCompletionStatements(
+  completions: Completion[],
+): SqlStatement[] {
+  return [
+    statement('DELETE FROM completions'),
+    ...completions.map((completion) =>
+      statement('INSERT INTO completions (task_id, date) VALUES (?, ?)', [
+        completion.taskId,
+        completion.date,
+      ]),
+    ),
+  ];
 }
 
-async function replaceTaskDailyMemos(
-  taskDailyMemos: TaskDailyMemo[],
-): Promise<void> {
-  await appDb.execute('DELETE FROM task_daily_memos');
+function buildTimeEntryStatements(timeEntries: TimeEntry[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM time_entries'),
+    ...timeEntries.map((entry) =>
+      statement(
+        `
+          INSERT INTO time_entries (
+            id,
+            task_id,
+            date,
+            started_at,
+            ended_at,
+            minutes
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          entry.id,
+          entry.taskId,
+          entry.date,
+          entry.startedAt,
+          entry.endedAt,
+          entry.minutes,
+        ],
+      ),
+    ),
+  ];
+}
 
-  for (const memo of taskDailyMemos) {
-    await appDb.execute(
-      `
-        INSERT INTO task_daily_memos (
-          id,
-          task_id,
-          date,
-          text,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      [memo.id, memo.taskId, memo.date, memo.text, memo.updatedAt],
-    );
-  }
+function buildMemoStatements(taskDailyMemos: TaskDailyMemo[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM task_daily_memos'),
+    ...taskDailyMemos.map((memo) =>
+      statement(
+        `
+          INSERT INTO task_daily_memos (
+            id,
+            task_id,
+            date,
+            text,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        [memo.id, memo.taskId, memo.date, memo.text, memo.updatedAt],
+      ),
+    ),
+  ];
+}
+
+function buildSnapshotStatements(data: PersistedAppData): SqlStatement[] {
+  return [
+    ...buildTaskStatements(data.tasks),
+    ...buildCompletionStatements(data.completions),
+    ...buildTimeEntryStatements(data.timeEntries),
+    ...buildMemoStatements(data.taskDailyMemos),
+  ];
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
@@ -312,22 +329,7 @@ async function saveAppData(data: PersistedAppData): Promise<void> {
   if (!isTauri()) return;
 
   await appDb.init();
-  await appDb.execute('BEGIN TRANSACTION');
-
-  try {
-    await replaceTasks(data.tasks);
-    await replaceCompletions(data.completions);
-    await replaceTimeEntries(data.timeEntries);
-    await replaceTaskDailyMemos(data.taskDailyMemos);
-    await appDb.execute('COMMIT');
-  } catch (error) {
-    try {
-      await appDb.execute('ROLLBACK');
-    } catch (rollbackError) {
-      console.error('Failed to roll back app data save', rollbackError);
-    }
-    throw error;
-  }
+  await appDb.executeTransaction(buildSnapshotStatements(data));
 }
 
 function loadLegacyAppData(): LegacyAppData {

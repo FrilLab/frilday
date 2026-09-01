@@ -18,7 +18,7 @@ export function ManagePage(props: {
   todayDow: DayOfWeek; // (role: day-of-week, type: DayOfWeek)
 
   nowIso: string; // (role: ui clock iso, type: string)
-  runningTaskIdToday: string | null; // (role: single running task id, type: string | null)
+  runningTaskId: string | null; // (role: single running task id, type: string | null)
 
   manageQuery: string; // (role: search query, type: string)
   setManageQuery: (v: string) => void; // (role: set query, type: (string)=>void)
@@ -56,7 +56,7 @@ export function ManagePage(props: {
     todayYmd,
     todayDow,
     nowIso,
-    runningTaskIdToday,
+    runningTaskId,
     manageQuery,
     setManageQuery,
     manageCategory,
@@ -195,7 +195,7 @@ export function ManagePage(props: {
             todayYmd={todayYmd}
             todayDow={todayDow}
             nowIso={nowIso}
-            runningTaskIdToday={runningTaskIdToday}
+            runningTaskId={runningTaskId}
             onUpdateTaskMeta={onUpdateTaskMeta}
             onToggleToday={onToggleToday}
             onArchive={onArchive}

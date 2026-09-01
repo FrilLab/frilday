@@ -15,7 +15,7 @@ interface TaskListItemProps {
   todayDow: DayOfWeek; // (role: day-of-week, type: DayOfWeek)
 
   nowIso: string; // (role: ui clock iso, type: string)
-  runningTaskIdToday: string | null; // (role: single running task id, type: string | null)
+  runningTaskId: string | null; // (role: single running task id, type: string | null)
 
   variant: 'today' | 'manage'; // (role: UI behavior switch, type: union)
   memoText?: string; // (role: today memo text, type: string | undefined)
@@ -47,7 +47,7 @@ export function TaskListItem(props: TaskListItemProps) {
     todayYmd,
     todayDow,
     nowIso,
-    runningTaskIdToday,
+    runningTaskId,
     variant,
     memoText,
     onToggleToday,
@@ -81,7 +81,7 @@ export function TaskListItem(props: TaskListItemProps) {
   const safeTimeEntries = timeEntries ?? [];
 
   // Store policy: only ONE running entry is active at a time.
-  const running = runningTaskIdToday === task.id;
+  const running = runningTaskId === task.id;
 
   const totalMinutesToday = totalTrackedMinutes(
     safeTimeEntries,
