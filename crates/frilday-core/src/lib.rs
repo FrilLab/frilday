@@ -8,7 +8,7 @@
 mod model;
 
 pub use model::{
-    Completion, CompletionTarget, Date, DomainError, LocalDate, Plan, PlanId, PlanState,
+    Completion, CompletionKey, Date, DomainError, LocalDate, Plan, PlanId, PlanState,
     PlannedDuration, Routine, RoutineId, RoutineState, ScheduleRule, Session, SessionId, Timestamp,
-    TrackedDuration, Weekday, ensure_single_running_session, toggle_completion,
+    TrackedDuration, Weekday, ensure_single_running_session, start_session, toggle_completion,
 };

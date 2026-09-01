@@ -14,7 +14,6 @@ pub enum DomainError {
     SessionEndsBeforeItStarts,
     SessionAlreadyEnded,
     MultipleRunningSessions,
-    InvalidCompletionTarget,
 }
 
 impl fmt::Display for DomainError {
@@ -39,9 +38,6 @@ impl fmt::Display for DomainError {
             }
             Self::SessionAlreadyEnded => f.write_str("session has already ended"),
             Self::MultipleRunningSessions => f.write_str("only one session may be running"),
-            Self::InvalidCompletionTarget => {
-                f.write_str("completion target must identify a routine or plan")
-            }
         }
     }
 }
@@ -133,6 +129,37 @@ impl LocalDate {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Return the weekday for this local calendar date without timezone
+    /// conversion. The core owns this calculation so callers cannot pass a
+    /// weekday that disagrees with the date.
+    pub fn weekday(&self) -> Weekday {
+        let year = self.0[0..4].parse::<u32>().expect("LocalDate is validated");
+        let month = self.0[5..7]
+            .parse::<usize>()
+            .expect("LocalDate is validated");
+        let day = self.0[8..10]
+            .parse::<u32>()
+            .expect("LocalDate is validated");
+        let offsets = [0_u32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+        let adjusted_year = year - u32::from(month < 3);
+        let sunday_first = (adjusted_year + adjusted_year / 4 - adjusted_year / 100
+            + adjusted_year / 400
+            + offsets[month - 1]
+            + day)
+            % 7;
+
+        match sunday_first {
+            0 => Weekday::Sunday,
+            1 => Weekday::Monday,
+            2 => Weekday::Tuesday,
+            3 => Weekday::Wednesday,
+            4 => Weekday::Thursday,
+            5 => Weekday::Friday,
+            6 => Weekday::Saturday,
+            _ => unreachable!("weekday is modulo seven"),
+        }
     }
 }
 
@@ -373,13 +400,13 @@ impl Routine {
         self.state == RoutineState::Active
     }
 
-    pub fn is_eligible_on(&self, date: &LocalDate, weekday: Weekday) -> bool {
+    pub fn is_eligible_on(&self, date: &LocalDate) -> bool {
         self.is_active()
             && self
                 .starts_on
                 .as_ref()
                 .is_none_or(|starts_on| date >= starts_on)
-            && self.schedule.includes(weekday)
+            && self.schedule.includes(date.weekday())
     }
 
     pub fn id(&self) -> &RoutineId {
@@ -594,37 +621,89 @@ pub fn ensure_single_running_session(sessions: &[Session]) -> Result<(), DomainE
     Ok(())
 }
 
+/// Start a running session while enforcing the desktop's single-running-
+/// session invariant atomically for the supplied collection.
+pub fn start_session(sessions: &mut Vec<Session>, session: Session) -> Result<(), DomainError> {
+    ensure_single_running_session(sessions)?;
+    if !session.is_running() || sessions.iter().any(Session::is_running) {
+        return Err(if session.is_running() {
+            DomainError::MultipleRunningSessions
+        } else {
+            DomainError::SessionAlreadyEnded
+        });
+    }
+    sessions.push(session);
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum CompletionTarget {
-    Routine(RoutineId),
-    Plan(PlanId),
+pub enum CompletionKey {
+    RoutineDate {
+        routine_id: RoutineId,
+        date: LocalDate,
+    },
+    PlanDate {
+        plan_id: PlanId,
+        date: LocalDate,
+    },
 }
 
 /// A binary signal for a routine/date or plan/date. It intentionally has no
 /// session reference: completion and time investment are independent facts.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Completion {
-    target: CompletionTarget,
+    routine_id: Option<RoutineId>,
+    plan_id: Option<PlanId>,
     date: LocalDate,
 }
 
 impl Completion {
     pub fn for_routine(routine_id: RoutineId, date: LocalDate) -> Self {
         Self {
-            target: CompletionTarget::Routine(routine_id),
+            routine_id: Some(routine_id),
+            plan_id: None,
+            date,
+        }
+    }
+
+    pub fn for_routine_plan(routine_id: RoutineId, plan_id: PlanId, date: LocalDate) -> Self {
+        Self {
+            routine_id: Some(routine_id),
+            plan_id: Some(plan_id),
             date,
         }
     }
 
     pub fn for_plan(plan_id: PlanId, date: LocalDate) -> Self {
         Self {
-            target: CompletionTarget::Plan(plan_id),
+            routine_id: None,
+            plan_id: Some(plan_id),
             date,
         }
     }
 
-    pub fn target(&self) -> &CompletionTarget {
-        &self.target
+    /// Return the canonical toggle key. A historical completion may retain
+    /// both IDs, but a routine/date key remains canonical when present.
+    pub fn key(&self) -> CompletionKey {
+        match (&self.routine_id, &self.plan_id) {
+            (Some(routine_id), _) => CompletionKey::RoutineDate {
+                routine_id: routine_id.clone(),
+                date: self.date.clone(),
+            },
+            (None, Some(plan_id)) => CompletionKey::PlanDate {
+                plan_id: plan_id.clone(),
+                date: self.date.clone(),
+            },
+            (None, None) => unreachable!("Completion constructors always set a target"),
+        }
+    }
+
+    pub fn routine_id(&self) -> Option<&RoutineId> {
+        self.routine_id.as_ref()
+    }
+
+    pub fn plan_id(&self) -> Option<&PlanId> {
+        self.plan_id.as_ref()
     }
 
     pub fn date(&self) -> &LocalDate {
@@ -634,14 +713,18 @@ impl Completion {
 
 /// Toggle one completion without touching sessions or other completion keys.
 pub fn toggle_completion(completions: &[Completion], completion: Completion) -> Vec<Completion> {
-    let exists = completions.iter().any(|current| current == &completion);
+    let key = completion.key();
+    let exists = completions.iter().any(|current| current.key() == key);
     if exists {
         completions
             .iter()
-            .filter(|current| *current != &completion)
+            .filter(|current| current.key() != key)
             .cloned()
             .collect()
     } else {
+        if completions.iter().any(|current| current.key() == key) {
+            return completions.to_vec();
+        }
         let mut next = completions.to_vec();
         next.push(completion);
         next
@@ -715,7 +798,7 @@ mod tests {
         routine.archive();
         assert_eq!(routine.state(), RoutineState::Archived);
         assert_eq!(routine.id().as_str(), "routine-1");
-        assert!(!routine.is_eligible_on(&date("2026-01-12"), Weekday::Monday));
+        assert!(!routine.is_eligible_on(&date("2026-01-12")));
     }
 
     #[test]
@@ -851,12 +934,66 @@ mod tests {
     }
 
     #[test]
-    fn completion_toggles_independently_of_session_data() {
-        let completion = Completion::for_routine(id("routine-1"), date("2026-01-12"));
+    fn starting_a_second_running_session_is_rejected_before_insertion() {
+        let first = Session::new(
+            session_id("session-1"),
+            Some(id("routine-1")),
+            None,
+            Timestamp::from_unix_seconds(10),
+            None,
+        )
+        .unwrap();
+        let second = Session::new(
+            session_id("session-2"),
+            Some(id("routine-2")),
+            None,
+            Timestamp::from_unix_seconds(20),
+            None,
+        )
+        .unwrap();
+        let mut sessions = vec![first];
+        assert_eq!(
+            start_session(&mut sessions, second),
+            Err(DomainError::MultipleRunningSessions)
+        );
+        assert_eq!(sessions.len(), 1);
+    }
+
+    #[test]
+    fn completion_keeps_historical_plan_association_but_toggles_by_routine_date() {
+        let completion =
+            Completion::for_routine_plan(id("routine-1"), plan_id("plan-1"), date("2026-01-12"));
         let other = Completion::for_plan(plan_id("plan-2"), date("2026-01-12"));
+        assert_eq!(completion.routine_id().unwrap().as_str(), "routine-1");
+        assert_eq!(completion.plan_id().unwrap().as_str(), "plan-1");
+
         let one = toggle_completion(&[], completion.clone());
         let two = toggle_completion(&one, other.clone());
         assert_eq!(two, vec![completion.clone(), other.clone()]);
-        assert_eq!(toggle_completion(&two, completion), vec![other]);
+        assert_eq!(
+            toggle_completion(
+                &two,
+                Completion::for_routine(id("routine-1"), date("2026-01-12"))
+            ),
+            vec![other]
+        );
+    }
+
+    #[test]
+    fn eligibility_derives_weekday_from_local_date() {
+        let routine = Routine::new(
+            id("routine-1"),
+            "Weekend",
+            "",
+            minutes(30),
+            ScheduleRule::weekends(),
+            Timestamp::from_unix_seconds(1),
+            date("2026-01-01"),
+            None,
+        )
+        .unwrap();
+
+        assert!(routine.is_eligible_on(&date("2026-01-11"))); // Sunday
+        assert!(!routine.is_eligible_on(&date("2026-01-12"))); // Monday
     }
 }

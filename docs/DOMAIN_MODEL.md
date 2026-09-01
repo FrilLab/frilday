@@ -74,15 +74,19 @@ truth. An end before the start is invalid. A session may cross local midnight;
 its plan/date association remains the one selected when the session started,
 while its elapsed interval still uses the complete timestamps.
 
-Desktop v0.1 permits at most one running Session across the application. A
-start operation must validate the collection-level invariant before adding a
-new running Session.
+Desktop v0.1 permits at most one running Session across the application. The
+core `start_session` operation validates the existing collection and the
+prospective session before insertion; `ensure_single_running_session` remains
+available for validating an already assembled collection.
 
 ### Completion
 
-A `Completion` is a binary signal for a Routine/date or Plan/date. Its natural
-identity is the target plus local date, so toggling it is idempotent and must
-not duplicate records. It has no Session foreign key. A user can:
+A `Completion` is a binary signal for a Routine/date or Plan/date. A historical
+completion may retain both its RoutineId and materialized PlanId, but its
+canonical toggle key is Routine/date whenever the routine is known. A
+standalone Plan completion uses Plan/date. Toggling by that canonical key is
+idempotent and must not duplicate records. It has no Session foreign key. A
+user can:
 
 - track time without completing a Plan;
 - complete a Plan without tracking time;
@@ -95,8 +99,9 @@ not duplicate records. It has no Session foreign key. A user can:
 Routine, Plan, and Session IDs are opaque, stable strings owned by the
 application boundary that creates them. The core validates that they are
 non-empty but does not generate UUIDs or embed cloud/account ownership. A
-Completion uses a natural composite identity (`target`, `local date`) rather
-than an independently meaningful ID.
+Completion uses a natural composite identity: Routine/date when a routine
+association exists, otherwise Plan/date. It does not need an independently
+meaningful ID.
 
 ### Date versus timestamp
 
@@ -156,7 +161,7 @@ can move adapters safely. The mapping below is the compatibility contract.
 | `Task.isActive` | Routine state | `true` → Active, `false` → Archived. |
 | `Task.autoArchiveAfter` | Routine archive-after-completions limit | Preserve the optional positive threshold. |
 | `Task.repeatCount` | Routine finite-planning limit | Preserve as the legacy finite planning/backlog limit until scheduling extraction defines a more specific policy. |
-| `Completion(taskId, date)` | Routine/date Completion | Preserve the task ID as `RoutineId` and the local date. If a historical Plan is materialized, retain the optional Plan association. |
+| `Completion(taskId, date)` | Routine/date Completion | Preserve the task ID as `RoutineId` and the local date. If a historical Plan is materialized, use the completion form that retains both IDs while keeping Routine/date as the canonical toggle key. |
 | `TimeEntry.id` | `SessionId` | Preserve the exact existing entry ID. |
 | `TimeEntry.taskId` | Session `routine_id` | Preserve the task ID as `RoutineId`. |
 | `TimeEntry.date` | Session's historical Plan date | Use it to find or create the stable historical Plan for that routine/date. |
