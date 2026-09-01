@@ -24,10 +24,13 @@ more useful.
 
 ## Architecture boundaries
 
-- The desktop v0.1 runtime is:
+- The intended desktop v0.1 runtime is:
 
   `React → Tauri adapter → frilday-core → SQLite adapter`
 
+- The current codebase is mid-extraction: active desktop domain and SQLite
+  integration remain under `apps/desktop` until reusable rules are moved into
+  `crates/frilday-core`.
 - The future Axum server is a separate delivery adapter. Desktop v0.1 does
   not require a local Axum HTTP server to run.
 - Reusable domain rules belong in `crates/frilday-core`.

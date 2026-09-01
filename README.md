@@ -28,7 +28,7 @@ docs/
   ARCHITECTURE.md
 ```
 
-The desktop v0.1 runtime is:
+The intended desktop v0.1 runtime is:
 
 ```text
 React → Tauri adapter → frilday-core → SQLite adapter
@@ -43,6 +43,8 @@ The server is not required for the desktop runtime. See
 - `apps/desktop` is the active application surface.
 - `apps/server` and `crates/frilday-core` are foundational pieces for the
   separate future delivery path and ongoing domain extraction.
+- The current desktop scaffold still owns the active domain and SQLite
+  integration; the flow above is the target boundary for that extraction.
 
 ## Desktop app
 

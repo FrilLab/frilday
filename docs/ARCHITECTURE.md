@@ -33,15 +33,20 @@ crates/
 
 ## Runtime flow
 
-### Desktop v0.1
+### Target desktop v0.1 architecture
 
 ```text
 React → Tauri adapter → frilday-core → SQLite adapter
 ```
 
-The desktop application owns the local-first runtime. Tauri adapts native
-capabilities and SQLite persistence; `frilday-core` owns reusable domain
-rules. Desktop v0.1 does **not** require a local Axum HTTP server.
+This is the intended desktop v0.1 boundary. Once domain extraction is
+complete, the desktop application will use Tauri for native capabilities,
+`frilday-core` for reusable domain rules, and the SQLite adapter for local
+persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
+
+The current scaffold is still mid-extraction: active domain and SQLite
+integration remain under `apps/desktop`, while `crates/frilday-core` is not
+yet wired into the desktop crate.
 
 ### Future server delivery
 
