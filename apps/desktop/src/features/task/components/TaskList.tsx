@@ -6,6 +6,7 @@ import type {
   TaskDayState,
   TimeEntry,
 } from '../types';
+import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
 import { TaskListItem } from './TaskListItem';
 
@@ -40,6 +41,8 @@ interface TaskListProps {
 
   onError: (msg: string) => void;
   taskDayStates: ReadonlyMap<string, TaskDayState>;
+  isExecutionFocused?: boolean;
+  emptyMessage?: string;
 }
 
 export function TaskList(props: TaskListProps) {
@@ -49,13 +52,17 @@ export function TaskList(props: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-        {t('task.noTasks')}
+        {props.emptyMessage ?? t('task.noTasks')}
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className={clsx(
+        'space-y-2 transition-opacity',
+        props.isExecutionFocused && 'opacity-75',
+      )}>
       {tasks.map((t) => (
         <TaskListItem
           key={t.id}
@@ -78,6 +85,7 @@ export function TaskList(props: TaskListProps) {
           onStopTimer={props.onStopTimer}
           onError={props.onError}
           taskDayState={props.taskDayStates.get(t.id)}
+          isExecutionFocused={props.isExecutionFocused}
         />
       ))}
     </div>

@@ -36,8 +36,13 @@ export const ko = {
     schedule: '일정',
     days: '요일',
     plan: '계획',
+    planned: '계획',
+    actualTracked: '실제 기록',
     todaySpent: '오늘',
     todayTasksDescription: '오늘 일정에 포함된 작업만 표시됩니다.',
+    todayTasksDuringExecution:
+      '현재 세션에 집중하면서 아래에서 오늘 계획을 계속 확인할 수 있습니다.',
+    plansToday: '개 계획',
     manageTasks: '작업 관리',
     manageTasksDescription: '현재 필터가 적용된 작업 목록입니다.',
     filters: '필터',
@@ -91,8 +96,11 @@ export const ko = {
   time: {
     durationMin: '시간 (분)',
     basedOnTodayPlannedMinutes: '오늘 계획된 시간(분) 기준입니다.',
+    plannedVsActual: '실제 기록 / 계획',
+    trackedToday: '오늘 기록한 실제 시간',
     start: '시작',
     stop: '중지',
+    resume: '재개',
     hourShort: '시간',
     minuteShort: '분',
     day: {
@@ -128,6 +136,13 @@ export const ko = {
     resume: '재개',
     finish: '마치기',
     backToPlan: '계획으로 돌아가기',
+    switchConfirm:
+      '"{current}"에서 "{next}"로 전환할까요? 현재 세션을 중지하고 새 계획을 시작합니다.',
+  },
+
+  today: {
+    executionHint: '준비되면 다음 계획을 바로 시작하세요.',
+    activeExecutionHint: '현재 계획에 집중하세요. 실제 시간이 기록되고 있습니다.',
   },
 
   period: {
