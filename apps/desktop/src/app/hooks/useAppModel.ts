@@ -387,20 +387,24 @@ export function useAppModel() {
     });
   };
 
-  const handleFinishTimer = (task: Task) => {
+  const handleFinishTimer = async (task: Task) => {
     const hasRunningEntry = timeEntries.some(
       (entry) => entry.taskId === task.id && entry.endedAt == null,
     );
     if (runningTaskId === task.id || hasRunningEntry) {
-      void stopTimer({ taskId: task.id, today: new Date() });
+      await stopTimer({ taskId: task.id, today: new Date() });
     }
 
     setActiveTimerPhase('finished');
-    setActiveTimerTaskId(null);
     notifier.notify({
       level: 'info',
       message: `Timer finished`,
     });
+  };
+
+  const handleBackToPlan = () => {
+    setActiveTimerTaskId(null);
+    setActiveTimerPhase('ready');
   };
 
   return {
@@ -461,5 +465,6 @@ export function useAppModel() {
     handlePauseTimer: handleStopTimer,
     handleResumeTimer,
     handleFinishTimer,
+    handleBackToPlan,
   };
 }

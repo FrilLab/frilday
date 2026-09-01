@@ -76,6 +76,7 @@ export function TodayPage(props: {
   onPauseTimer: (task: Task) => void; // (role: pause timer, type: (Task)=>void)
   onResumeTimer: (task: Task) => void; // (role: resume timer, type: (Task)=>void)
   onFinishTimer: (task: Task) => void; // (role: finish timer, type: (Task)=>void)
+  onBackToPlan: () => void; // (role: leave finished timer, type: ()=>void)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
 }) {
   const { t } = useContext(LocaleContext);
@@ -104,6 +105,7 @@ export function TodayPage(props: {
     onPauseTimer,
     onResumeTimer,
     onFinishTimer,
+    onBackToPlan,
     onError,
   } = props;
 
@@ -191,6 +193,7 @@ export function TodayPage(props: {
             onPause={() => onPauseTimer(activeTimerTask)}
             onResume={() => onResumeTimer(activeTimerTask)}
             onFinish={() => onFinishTimer(activeTimerTask)}
+            onBackToPlan={onBackToPlan}
           />
         )}
 

@@ -102,6 +102,7 @@ export default function App() {
                 onPauseTimer={m.handlePauseTimer}
                 onResumeTimer={m.handleResumeTimer}
                 onFinishTimer={m.handleFinishTimer}
+                onBackToPlan={m.handleBackToPlan}
               />
             )}
 
