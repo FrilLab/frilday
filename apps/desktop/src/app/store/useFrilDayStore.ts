@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types';
 import { loadAppData, replaceAllAppData } from '../../infrastructure/storage';
 import { toYmd } from '../../shared/utils/date';
+import { createSerialQueue } from '../../shared/utils/serialQueue';
 import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
@@ -98,6 +99,8 @@ function persistCollections(
     });
   });
 }
+
+const enqueueCompletionToggle = createSerialQueue();
 
 export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   hydrated: false,
@@ -302,44 +305,45 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     persistCollections(next, 'Failed to delete task.');
   },
 
-  toggleToday: async ({ taskId, today }) => {
-    const date = toYmd(today);
+  toggleToday: ({ taskId, today }) =>
+    enqueueCompletionToggle(async () => {
+      const date = toYmd(today);
 
-    try {
-      const result = await toggleCompletionWithCore({
-        tasks: get().tasks,
-        completions: get().completions,
-        taskId,
-        date,
-      });
-      const toggledTask = get().tasks.find((task) => task.id === taskId);
-      const nextTasks =
-        result.autoArchived && toggledTask
-          ? get().tasks.map((task) =>
-              task.id === taskId ? { ...task, isActive: false } : task,
-            )
-          : get().tasks;
-
-      if (result.autoArchived && toggledTask) {
-        getNotifier().notify({
-          level: 'info',
-          message: `Auto-archived: ${toggledTask.title}`,
+      try {
+        const result = await toggleCompletionWithCore({
+          tasks: get().tasks,
+          completions: get().completions,
+          taskId,
+          date,
         });
+        const toggledTask = get().tasks.find((task) => task.id === taskId);
+        const nextTasks =
+          result.autoArchived && toggledTask
+            ? get().tasks.map((task) =>
+                task.id === taskId ? { ...task, isActive: false } : task,
+              )
+            : get().tasks;
+
+        if (result.autoArchived && toggledTask) {
+          getNotifier().notify({
+            level: 'info',
+            message: `Auto-archived: ${toggledTask.title}`,
+          });
+        }
+
+        const next = {
+          tasks: nextTasks,
+          completions: result.completions,
+          timeEntries: get().timeEntries,
+          taskDailyMemos: get().taskDailyMemos,
+        };
+
+        set({ ...next, errorMsg: '' });
+        persistCollections(next, 'Failed to update completion.');
+      } catch (error) {
+        set({ errorMsg: `Failed to update completion. ${formatError(error)}` });
       }
-
-      const next = {
-        tasks: nextTasks,
-        completions: result.completions,
-        timeEntries: get().timeEntries,
-        taskDailyMemos: get().taskDailyMemos,
-      };
-
-      set({ ...next, errorMsg: '' });
-      persistCollections(next, 'Failed to update completion.');
-    } catch (error) {
-      set({ errorMsg: `Failed to update completion. ${formatError(error)}` });
-    }
-  },
+    }),
 
   setDailyMemo: ({ taskId, date, text }) => {
     const nextMemos = upsertDailyMemo(get().taskDailyMemos, {
