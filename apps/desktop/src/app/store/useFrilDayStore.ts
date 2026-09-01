@@ -70,8 +70,8 @@ interface FrilDayState {
   deleteTask: (taskId: string) => void;
   toggleToday: (input: { taskId: string; today: Date }) => Promise<void>;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
-  startTimer: (input: { taskId: string; today: Date }) => Promise<void>;
-  stopTimer: (input: { taskId: string; today: Date }) => Promise<void>;
+  startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
+  stopTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   autoStopIfReached: () => Promise<string[]>;
 }
 
@@ -95,6 +95,11 @@ function formatError(error: unknown): string {
   }
 }
 
+type TimerMutationResult = {
+  ok: boolean;
+  changed: boolean;
+};
+
 function persist(
   operation: AsyncOperation,
   failureMessage: string,
@@ -111,7 +116,7 @@ const enqueuePersistence = createSerialQueue();
 const enqueueCompletionToggle = createSerialQueue();
 // Serialize starts and stops so two quick actions cannot observe the same
 // stale session list and create competing active sessions.
-const enqueueTimerMutation = createSerialQueue();
+const enqueueTimerMutation = createSerialQueue<TimerMutationResult>();
 
 export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   hydrated: false,
@@ -377,6 +382,11 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       const nowIso = new Date().toISOString();
 
       const entries = get().timeEntries;
+      const runningEntry = entries.find((entry) => entry.endedAt == null);
+      if (runningEntry?.taskId === taskId) {
+        return { ok: true, changed: false };
+      }
+
       try {
         const nextTimeEntries = await startTimerWithCore({
           timeEntries: entries,
@@ -390,8 +400,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           () => saveTimeEntries(nextTimeEntries),
           'Failed to start timer.',
         );
+        return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
+        return { ok: false, changed: false };
       }
     }),
 
@@ -399,6 +411,13 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     enqueueTimerMutation(async () => {
       const date = toYmd(today);
       const nowIso = new Date().toISOString();
+      const hasRunningEntry = get().timeEntries.some(
+        (entry) => entry.taskId === taskId && entry.endedAt == null,
+      );
+      if (!hasRunningEntry) {
+        return { ok: false, changed: false };
+      }
+
       try {
         const nextTimeEntries = await stopTimerWithCore({
           timeEntries: get().timeEntries,
@@ -411,8 +430,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           () => saveTimeEntries(nextTimeEntries),
           'Failed to stop timer.',
         );
+        return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
+        return { ok: false, changed: false };
       }
     }),
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrilDayStore } from '../store/useFrilDayStore';
 import { dayOfWeek, startOfWeekMonday, toYmd } from '../../shared/utils/date';
 import type { Task, TaskDayState } from '../../shared/types';
@@ -106,6 +106,7 @@ export function useAppModel() {
   const [pendingTimerTaskId, setPendingTimerTaskId] = useState<string | null>(
     null,
   );
+  const pendingTimerStarts = useRef(new Set<string>());
   const [scheduleSlots, setScheduleSlots] = useState<
     Awaited<ReturnType<typeof getVisibleScheduleSlots>>
   >([]);
@@ -392,7 +393,9 @@ export function useAppModel() {
   };
 
   // 실시간을 위해 today(useMemo) 대신 현재 날짜 받기
-  const handleStartTimer = async (task: Task) => {
+  const startTimerForTask = async (task: Task, message: string) => {
+    if (pendingTimerStarts.current.has(task.id)) return;
+
     const currentTask =
       runningTaskId == null
         ? activeTimerPhase === 'running'
@@ -410,49 +413,60 @@ export function useAppModel() {
       if (!shouldSwitch) return;
     }
 
+    const previousTaskId = activeTimerTask?.id ?? runningTaskId;
+    const previousPhase = activeTimerPhaseForView;
+    pendingTimerStarts.current.add(task.id);
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('running');
     setPendingTimerTaskId(task.id);
     try {
-      await startTimer({ taskId: task.id, today: new Date() });
+      const result = await startTimer({ taskId: task.id, today: new Date() });
+      if (!result.ok) {
+        setActiveTimerTaskId(previousTaskId ?? null);
+        setActiveTimerPhase(previousTaskId == null ? 'ready' : previousPhase);
+        return;
+      }
+
+      if (result.changed) {
+        notifier.notify({
+          level: 'info',
+          message,
+        });
+      }
     } finally {
+      pendingTimerStarts.current.delete(task.id);
       setPendingTimerTaskId((pending) =>
         pending === task.id ? null : pending,
       );
     }
+  };
 
-    notifier.notify({
-      level: 'info',
-      message: `Timer started`,
-    });
+  const handleStartTimer = (task: Task) => {
+    void startTimerForTask(task, 'Timer started');
   };
 
   const handleStopTimer = async (task: Task) => {
+    const previousTaskId = activeTimerTask?.id ?? runningTaskId;
+    const previousPhase = activeTimerPhaseForView;
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('paused');
-    await stopTimer({ taskId: task.id, today: new Date() });
-    notifier.notify({
-      level: 'info',
-      message: `Timer paused`,
-    });
-  };
-
-  const handleResumeTimer = async (task: Task) => {
-    setActiveTimerTaskId(task.id);
-    setActiveTimerPhase('running');
-    setPendingTimerTaskId(task.id);
-    try {
-      await startTimer({ taskId: task.id, today: new Date() });
-    } finally {
-      setPendingTimerTaskId((pending) =>
-        pending === task.id ? null : pending,
-      );
+    const result = await stopTimer({ taskId: task.id, today: new Date() });
+    if (!result.ok) {
+      setActiveTimerTaskId(previousTaskId ?? null);
+      setActiveTimerPhase(previousTaskId == null ? 'ready' : previousPhase);
+      return;
     }
 
-    notifier.notify({
-      level: 'info',
-      message: `Timer resumed`,
-    });
+    if (result.changed) {
+      notifier.notify({
+        level: 'info',
+        message: `Timer paused`,
+      });
+    }
+  };
+
+  const handleResumeTimer = (task: Task) => {
+    void startTimerForTask(task, 'Timer resumed');
   };
 
   const handleFinishTimer = async (task: Task) => {
@@ -460,7 +474,8 @@ export function useAppModel() {
       (entry) => entry.taskId === task.id && entry.endedAt == null,
     );
     if (runningTaskId === task.id || hasRunningEntry) {
-      await stopTimer({ taskId: task.id, today: new Date() });
+      const result = await stopTimer({ taskId: task.id, today: new Date() });
+      if (!result.ok) return;
     }
 
     setActiveTimerPhase('finished');

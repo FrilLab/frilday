@@ -33,4 +33,17 @@ describe('serial async queue', () => {
     expect(secondObservedState).toEqual(['first']);
     expect(state).toEqual(['first', 'second']);
   });
+
+  test('preserves operation results while continuing after a rejection', async () => {
+    const enqueue = createSerialQueue<number>();
+    const first = enqueue(async () => 1);
+    const rejected = enqueue(async () => {
+      throw new Error('expected failure');
+    });
+    const third = enqueue(async () => 3);
+
+    expect(await first).toBe(1);
+    await expect(rejected).rejects.toThrow('expected failure');
+    expect(await third).toBe(3);
+  });
 });
