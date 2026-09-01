@@ -870,6 +870,141 @@ mod tests {
         }
     }
 
+    fn representative_legacy_data() -> AppData {
+        AppData {
+            tasks: vec![
+                TaskRecord {
+                    id: "active-weekday".to_owned(),
+                    title: "English study".to_owned(),
+                    description: "Review vocabulary".to_owned(),
+                    category: "weekday".to_owned(),
+                    days_of_week: vec![
+                        "Mon".to_owned(),
+                        "Tue".to_owned(),
+                        "Wed".to_owned(),
+                        "Thu".to_owned(),
+                        "Fri".to_owned(),
+                    ],
+                    duration_minutes: 45,
+                    start_ymd: Some("2026-01-05".to_owned()),
+                    auto_archive_after: Some(3),
+                    repeat_count: Some(5),
+                    is_active: true,
+                    created_at: "2026-01-01T08:00:00.000Z".to_owned(),
+                },
+                TaskRecord {
+                    id: "archived-weekend".to_owned(),
+                    title: "Weekend planning".to_owned(),
+                    description: "Historical routine".to_owned(),
+                    category: "weekend".to_owned(),
+                    days_of_week: vec!["Sat".to_owned(), "Sun".to_owned()],
+                    duration_minutes: 20,
+                    start_ymd: None,
+                    auto_archive_after: Some(2),
+                    repeat_count: None,
+                    is_active: false,
+                    created_at: "2025-12-01T08:00:00.000Z".to_owned(),
+                },
+                TaskRecord {
+                    id: "active-custom".to_owned(),
+                    title: "Project writing".to_owned(),
+                    description: "Draft the next section".to_owned(),
+                    category: "custom".to_owned(),
+                    days_of_week: vec!["Tue".to_owned(), "Thu".to_owned()],
+                    duration_minutes: 60,
+                    start_ymd: Some("2026-01-06".to_owned()),
+                    auto_archive_after: Some(4),
+                    repeat_count: None,
+                    is_active: true,
+                    created_at: "2026-01-02T08:00:00.000Z".to_owned(),
+                },
+            ],
+            completions: vec![
+                CompletionRecord {
+                    task_id: "active-weekday".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                },
+                CompletionRecord {
+                    task_id: "active-weekday".to_owned(),
+                    date: "2026-01-12".to_owned(),
+                },
+                CompletionRecord {
+                    task_id: "archived-weekend".to_owned(),
+                    date: "2025-12-20".to_owned(),
+                },
+                CompletionRecord {
+                    task_id: "active-custom".to_owned(),
+                    date: "2026-01-06".to_owned(),
+                },
+            ],
+            time_entries: vec![
+                TimeEntryRecord {
+                    id: "entry-active-history".to_owned(),
+                    task_id: "active-weekday".to_owned(),
+                    date: "2025-12-29".to_owned(),
+                    started_at: "2025-12-29T09:00:00.000Z".to_owned(),
+                    ended_at: Some("2025-12-29T09:40:00.000Z".to_owned()),
+                    minutes: 40,
+                },
+                TimeEntryRecord {
+                    id: "entry-active-running".to_owned(),
+                    task_id: "active-weekday".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                    started_at: "2026-01-05T10:00:00.000Z".to_owned(),
+                    ended_at: None,
+                    minutes: 0,
+                },
+                TimeEntryRecord {
+                    id: "entry-archived-history".to_owned(),
+                    task_id: "archived-weekend".to_owned(),
+                    date: "2025-12-20".to_owned(),
+                    started_at: "2025-12-20T11:00:00.000Z".to_owned(),
+                    ended_at: Some("2025-12-20T11:25:00.000Z".to_owned()),
+                    minutes: 25,
+                },
+                TimeEntryRecord {
+                    id: "entry-custom".to_owned(),
+                    task_id: "active-custom".to_owned(),
+                    date: "2026-01-06".to_owned(),
+                    started_at: "2026-01-06T14:00:00.000Z".to_owned(),
+                    ended_at: Some("2026-01-06T15:10:00.000Z".to_owned()),
+                    minutes: 70,
+                },
+            ],
+            task_daily_memos: vec![
+                TaskDailyMemoRecord {
+                    id: "active-weekday_2025-12-29".to_owned(),
+                    task_id: "active-weekday".to_owned(),
+                    date: "2025-12-29".to_owned(),
+                    text: "Historical note".to_owned(),
+                    updated_at: "2025-12-29T10:00:00.000Z".to_owned(),
+                },
+                TaskDailyMemoRecord {
+                    id: "active-custom_2026-01-06".to_owned(),
+                    task_id: "active-custom".to_owned(),
+                    date: "2026-01-06".to_owned(),
+                    text: "Draft is progressing".to_owned(),
+                    updated_at: "2026-01-06T15:15:00.000Z".to_owned(),
+                },
+            ],
+        }
+    }
+
+    fn normalize_loaded_order(data: &mut AppData) {
+        data.tasks
+            .sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        data.completions.sort_by(|left, right| {
+            right
+                .date
+                .cmp(&left.date)
+                .then_with(|| left.task_id.cmp(&right.task_id))
+        });
+        data.time_entries
+            .sort_by(|left, right| right.started_at.cmp(&left.started_at));
+        data.task_daily_memos
+            .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    }
+
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -889,6 +1024,30 @@ mod tests {
             let result = import_app_data(&pool, &data).await.unwrap();
             assert_eq!(result.imported, true);
             assert_eq!(load_app_data_from_pool(&pool).await.unwrap(), data);
+        });
+    }
+
+    #[test]
+    fn imports_representative_legacy_history_without_resetting_the_database() {
+        tauri::async_runtime::block_on(async {
+            let pool = test_pool().await;
+            let data = representative_legacy_data();
+
+            import_app_data(&pool, &data).await.unwrap();
+
+            let mut loaded = load_app_data_from_pool(&pool).await.unwrap();
+            let mut expected = data.clone();
+            normalize_loaded_order(&mut loaded);
+            normalize_loaded_order(&mut expected);
+            assert_eq!(loaded, expected);
+            assert_eq!(migration_marker(&pool).await.unwrap().as_deref(), Some("1"));
+
+            let second = import_app_data(&pool, &data).await.unwrap();
+            assert_eq!(second.imported, false);
+            assert_eq!(second.skipped_existing_data, false);
+            let mut reloaded = load_app_data_from_pool(&pool).await.unwrap();
+            normalize_loaded_order(&mut reloaded);
+            assert_eq!(reloaded, expected);
         });
     }
 
