@@ -1,150 +1,114 @@
-import { isTauri } from './runtime';
 import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from './runtime';
+import type {
+  Completion,
+  Task,
+  TaskDailyMemo,
+  TimeEntry,
+} from '../../shared/types';
 
-export type SqlStatement = {
-  sql: string;
-  bind: unknown[];
+export type PersistedAppData = {
+  tasks: Task[];
+  completions: Completion[];
+  timeEntries: TimeEntry[];
+  taskDailyMemos: TaskDailyMemo[];
 };
 
-export type AppDb = {
-  init(): Promise<void>;
-  execute(sql: string, bind?: unknown[]): Promise<void>;
-  select<T>(sql: string, bind?: unknown[]): Promise<T[]>;
-  executeTransaction(statements: SqlStatement[]): Promise<void>;
+type LegacyMigrationOutput = {
+  imported: boolean;
+  skippedExistingData: boolean;
 };
 
-// Keep the existing database filename; changing it would bypass the native migration.
-const DB_URL = 'sqlite:daily_check.db';
-
-let dbPromise: Promise<import('@tauri-apps/plugin-sql').default> | null = null;
-let initPromise: Promise<void> | null = null;
-
-async function getDatabase(): Promise<import('@tauri-apps/plugin-sql').default> {
+async function invokePersistence<T>(
+  command: string,
+  payload?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri()) {
-    throw new Error('SQLite is unavailable in web runtime.');
+    throw new Error('Desktop persistence is unavailable in web runtime.');
   }
-
-  if (!dbPromise) {
-    dbPromise = import('@tauri-apps/plugin-sql').then(({ default: Database }) =>
-      Database.load(DB_URL),
-    );
-  }
-
-  return dbPromise;
-}
-
-async function initializeSchema(): Promise<void> {
-  const db = await getDatabase();
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS settings_kv (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      )
-    `,
-    [],
-  );
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS app_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      )
-    `,
-    [],
-  );
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        category TEXT NOT NULL,
-        days_of_week TEXT NOT NULL,
-        duration_minutes INTEGER NOT NULL,
-        start_ymd TEXT,
-        auto_archive_after INTEGER,
-        repeat_count INTEGER,
-        is_active INTEGER NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `,
-    [],
-  );
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS completions (
-        task_id TEXT NOT NULL,
-        date TEXT NOT NULL,
-        PRIMARY KEY (task_id, date)
-      )
-    `,
-    [],
-  );
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS time_entries (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        date TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        minutes INTEGER NOT NULL
-      )
-    `,
-    [],
-  );
-  await db.execute(
-    `
-      CREATE TABLE IF NOT EXISTS task_daily_memos (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        date TEXT NOT NULL,
-        text TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE (task_id, date)
-      )
-    `,
-    [],
-  );
+  return invoke<T>(command, payload);
 }
 
 async function init(): Promise<void> {
-  if (!isTauri()) return;
-
-  if (!initPromise) {
-    initPromise = initializeSchema().catch((error) => {
-      initPromise = null;
-      throw error;
-    });
-  }
-
-  await initPromise;
+  await invokePersistence<void>('initialize_app_database');
 }
 
-async function execute(sql: string, bind: unknown[] = []): Promise<void> {
-  if (!isTauri()) return;
-  const db = await getDatabase();
-  await db.execute(sql, bind);
+async function load(): Promise<PersistedAppData> {
+  return invokePersistence<PersistedAppData>('load_app_data');
 }
 
-async function select<T>(sql: string, bind: unknown[] = []): Promise<T[]> {
-  if (!isTauri()) {
-    return [];
-  }
-  const db = await getDatabase();
-  return db.select<T[]>(sql, bind);
+async function importLegacy(
+  data: PersistedAppData,
+): Promise<LegacyMigrationOutput> {
+  return invokePersistence<LegacyMigrationOutput>('import_legacy_app_data', {
+    data,
+  });
 }
 
-async function executeTransaction(statements: SqlStatement[]): Promise<void> {
-  if (!isTauri()) return;
-
-  await invoke('execute_app_transaction', { statements });
+async function saveTask(task: Task): Promise<void> {
+  return invokePersistence<void>('save_task', { task });
 }
 
-export const appDb: AppDb = {
+async function setTaskActive(taskId: string, isActive: boolean): Promise<void> {
+  return invokePersistence<void>('set_task_active', {
+    request: { taskId, isActive },
+  });
+}
+
+async function deleteTask(taskId: string): Promise<void> {
+  return invokePersistence<void>('delete_task', { taskId });
+}
+
+async function setCompletion(
+  taskId: string,
+  date: string,
+  completed: boolean,
+): Promise<void> {
+  return invokePersistence<void>('set_completion', {
+    request: { taskId, date, completed },
+  });
+}
+
+async function saveTimeEntries(entries: TimeEntry[]): Promise<void> {
+  return invokePersistence<void>('save_time_entries', { entries });
+}
+
+async function saveTaskDailyMemo(memo: TaskDailyMemo): Promise<void> {
+  return invokePersistence<void>('save_task_daily_memo', { memo });
+}
+
+async function getSetting<T>(key: string): Promise<T | null> {
+  return invokePersistence<T | null>('get_setting', { key });
+}
+
+async function setSetting(key: string, value: unknown): Promise<void> {
+  return invokePersistence<void>('set_setting', {
+    request: { key, value },
+  });
+}
+
+async function getMigrationMarker(key: string): Promise<string | null> {
+  return invokePersistence<string | null>('get_migration_marker', { key });
+}
+
+async function setMigrationMarker(key: string, value: string): Promise<void> {
+  return invokePersistence<void>('set_migration_marker', {
+    request: { key, value },
+  });
+}
+
+export const appDb = {
   init,
-  execute,
-  select,
-  executeTransaction,
+  load,
+  importLegacy,
+  saveTask,
+  setTaskActive,
+  deleteTask,
+  setCompletion,
+  saveTimeEntries,
+  saveTaskDailyMemo,
+  getSetting,
+  setSetting,
+  getMigrationMarker,
+  setMigrationMarker,
 };

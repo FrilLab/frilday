@@ -74,9 +74,10 @@ or the `daily_check.db` filename.
 | `Completion.taskId`, `date` | `Completion::for_routine(RoutineId, LocalDate)` |
 | `TaskDailyMemo.taskId`, `date`, `text`, `updatedAt` | Adapter-owned daily memo record associated with a `Routine` and date |
 
-The current desktop adapter remains responsible for reading/writing these
-legacy collections. Moving the rules into core does not require a destructive
-database migration.
+The desktop persistence adapter remains responsible for reading/writing these
+legacy-shaped records. The React compatibility boundary only reads the old
+localStorage collections during the one-time import; moving the rules into
+core does not require a destructive database migration.
 
 ## Migration baseline
 

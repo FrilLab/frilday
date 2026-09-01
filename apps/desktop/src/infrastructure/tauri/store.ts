@@ -5,57 +5,12 @@ const SETTINGS_FILE = 'settings.json';
 const LEGACY_SETTINGS_MIGRATION_KEY = 'legacy_settings_migrated_v1';
 const LEGACY_SETTING_KEYS = ['locale', 'settings.notifications.timerDone'] as const;
 
-type SqlValueRow = {
-  value: string;
-};
-
-type MetaRow = {
-  value: string;
-};
-
-async function getMeta(key: string): Promise<string | null> {
-  const rows = await appDb.select<MetaRow>(
-    'SELECT value FROM app_meta WHERE key = ? LIMIT 1',
-    [key],
-  );
-  return rows[0]?.value ?? null;
-}
-
-async function setMeta(key: string, value: string): Promise<void> {
-  await appDb.execute(
-    `
-      INSERT INTO app_meta (key, value)
-      VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [key, value],
-  );
-}
-
 async function readSqlSetting<T>(key: string): Promise<T | null> {
-  const rows = await appDb.select<SqlValueRow>(
-    'SELECT value FROM settings_kv WHERE key = ? LIMIT 1',
-    [key],
-  );
-
-  if (!rows[0]) return null;
-
-  try {
-    return JSON.parse(rows[0].value) as T;
-  } catch {
-    return null;
-  }
+  return appDb.getSetting<T>(key);
 }
 
 async function writeSqlSetting(key: string, value: unknown): Promise<void> {
-  await appDb.execute(
-    `
-      INSERT INTO settings_kv (key, value)
-      VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `,
-    [key, JSON.stringify(value)],
-  );
+  await appDb.setSetting(key, value);
 }
 
 type LegacySetting = {
@@ -77,12 +32,10 @@ function readLegacyStorageSetting(key: string): LegacySetting {
 async function migrateLegacySettingsIfNeeded(): Promise<void> {
   if (!isTauri()) return;
 
-  await appDb.init();
-
-  const alreadyMigrated = await getMeta(LEGACY_SETTINGS_MIGRATION_KEY);
-  if (alreadyMigrated === '1') {
-    return;
-  }
+  const alreadyMigrated = await appDb.getMigrationMarker(
+    LEGACY_SETTINGS_MIGRATION_KEY,
+  );
+  if (alreadyMigrated === '1') return;
 
   let legacyStoreValues = new Map<string, unknown>();
   let hasInvalidLegacyValue = false;
@@ -123,7 +76,7 @@ async function migrateLegacySettingsIfNeeded(): Promise<void> {
   }
 
   if (!hasInvalidLegacyValue) {
-    await setMeta(LEGACY_SETTINGS_MIGRATION_KEY, '1');
+    await appDb.setMigrationMarker(LEGACY_SETTINGS_MIGRATION_KEY, '1');
   }
 }
 

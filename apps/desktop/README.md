@@ -51,5 +51,7 @@ macOS bundle output:
 - the desktop runtime is local-first and does not require a local Axum server
 - schedule, completion, session, timer, and statistics rules run through the
   Tauri adapter backed by `crates/frilday-core`
-- SQLite persistence remains a desktop adapter concern
+- SQLite schema and typed persistence commands live in the Rust-side desktop
+  adapter; legacy localStorage data is imported transactionally into the
+  existing `daily_check.db`
 - broader direction is documented in [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
