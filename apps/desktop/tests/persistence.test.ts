@@ -37,52 +37,61 @@ const fakeStorage = {
   setItem: (key: string, value: string) => storageValues.set(key, value),
 };
 
-const fakeAppDb = {
-  init: async () => undefined,
-  load: async () => databaseData,
-  importLegacy: async (data: PersistedAppData) => {
-    importCalls += 1;
-    if (migrationMarker) {
-      return { imported: false, skippedExistingData: false };
+mock.module('@tauri-apps/api/core', () => ({
+  invoke: async (
+    command: string,
+    payload?: {
+      data?: PersistedAppData;
+      task?: (typeof validLegacyTask) & { id: string };
+    },
+  ) => {
+    switch (command) {
+      case 'initialize_app_database':
+        return undefined;
+      case 'load_app_data':
+        return databaseData;
+      case 'import_legacy_app_data': {
+        importCalls += 1;
+        if (migrationMarker) {
+          return { imported: false, skippedExistingData: false };
+        }
+
+        const hasExistingData = Object.values(databaseData).some(
+          (collection) => collection.length > 0,
+        );
+        if (hasExistingData) {
+          migrationMarker = true;
+          return { imported: false, skippedExistingData: true };
+        }
+
+        databaseData = payload?.data ?? databaseData;
+        migrationMarker = true;
+        return {
+          imported: Object.values(databaseData).some(
+            (collection) => collection.length > 0,
+          ),
+          skippedExistingData: false,
+        };
+      }
+      case 'save_task': {
+        const task = payload?.task;
+        if (!task) return undefined;
+        saveTaskCalls += 1;
+        databaseData = {
+          ...databaseData,
+          tasks: [
+            task,
+            ...databaseData.tasks.filter(
+              (candidate) => candidate.id !== task.id,
+            ),
+          ],
+        };
+        return undefined;
+      }
+      default:
+        return undefined;
     }
-
-    const hasExistingData = Object.values(databaseData).some(
-      (collection) => collection.length > 0,
-    );
-    if (hasExistingData) {
-      migrationMarker = true;
-      return { imported: false, skippedExistingData: true };
-    }
-
-    databaseData = data;
-    migrationMarker = true;
-    return {
-      imported: Object.values(data).some((collection) => collection.length > 0),
-      skippedExistingData: false,
-    };
   },
-  saveTask: async (task: (typeof validLegacyTask) & { id: string }) => {
-    saveTaskCalls += 1;
-    databaseData = {
-      ...databaseData,
-      tasks: [
-        task,
-        ...databaseData.tasks.filter((candidate) => candidate.id !== task.id),
-      ],
-    };
-  },
-  setTaskActive: async () => undefined,
-  deleteTask: async () => undefined,
-  setCompletion: async () => undefined,
-  saveTimeEntries: async () => undefined,
-  saveAutoStopTransition: async () => undefined,
-  saveTaskDailyMemo: async () => undefined,
-  getSetting: async () => null,
-  setSetting: async () => undefined,
-};
-
-mock.module('../src/infrastructure/tauri/db.ts', () => ({
-  appDb: fakeAppDb,
 }));
 
 Object.assign(globalThis, {
