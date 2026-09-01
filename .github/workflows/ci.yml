@@ -10,7 +10,7 @@ on:
 
 jobs:
   desktop:
-    name: Desktop Build
+    name: Desktop
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -28,17 +28,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Test desktop app
-        run: npm run test
+      - name: Test
+        run: bun run test
 
-      - name: Lint desktop app
-        run: npm run lint
+      - name: Lint
+        run: bun run lint
 
-      - name: Build desktop app
-        run: npm run build
+      - name: Build
+        run: bun run build
 
   rust:
-    name: Rust Check
+    name: Rust
     runs-on: ubuntu-latest
 
     steps:
@@ -47,6 +47,11 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Install Tauri Linux dependencies
         run: |
@@ -62,11 +67,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Check Rust formatting
+      - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Check Rust workspace
-        run: cargo check --workspace
-
-      - name: Test Rust workspace
-        run: cargo test --workspace
+      - name: Test workspace
+        run: cargo test --workspace --locked
