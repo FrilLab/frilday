@@ -276,14 +276,17 @@ export function TaskListItem(props: TaskListItemProps) {
             <button
               type="button"
               onClick={() => {
+                if (running) {
+                  onStopTimer(task);
+                  return;
+                }
                 if (!scheduledToday) {
                   onError(tr('note.taskNotScheduledToday'));
                   return;
                 }
-                if (running) onStopTimer(task);
-                else onStartTimer(task);
+                onStartTimer(task);
               }}
-              disabled={!scheduledToday || doneToday}
+              disabled={(!scheduledToday && !running) || (doneToday && !running)}
               className={[
                 'rounded-xl border px-3 py-2 text-sm transition min-w-18 shrink-0',
                 running

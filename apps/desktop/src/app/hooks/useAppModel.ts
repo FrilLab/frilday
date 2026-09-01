@@ -76,10 +76,13 @@ export function useAppModel() {
     const filtered = tasks.filter((t) => {
       if (!t.isActive) return false;
 
+      const isRunning = runningTaskId === t.id;
       const createdAtYmd = t.createdAt.slice(0, 10);
       const startYmd = t.startYmd?.trim() || null;
       const effectiveStartYmd =
         startYmd && startYmd > createdAtYmd ? startYmd : createdAtYmd;
+      // Keep an active timer visible after midnight so it can still be stopped.
+      if (isRunning) return true;
       if (todayYmd < effectiveStartYmd) return false;
 
       const doneToday = completions.some(
@@ -97,7 +100,7 @@ export function useAppModel() {
       if (aDone === bDone) return 0;
       return aDone ? 1 : -1;
     });
-  }, [tasks, completions, todayDow, todayYmd, weekStartYmd]);
+  }, [tasks, completions, runningTaskId, todayDow, todayYmd, weekStartYmd]);
 
   const todayStats = useMemo(
     () => calcTodayStats(todayTasks, completions, todayYmd, todayDow),

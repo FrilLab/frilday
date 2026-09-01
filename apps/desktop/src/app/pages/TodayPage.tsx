@@ -88,7 +88,11 @@ export function TodayPage(props: {
     onError,
   } = props;
 
-  const plannedMinutesToday = todayTasks.reduce(
+  const scheduledTodayTasks = todayTasks.filter((task) =>
+    task.daysOfWeek.includes(todayDow),
+  );
+
+  const plannedMinutesToday = scheduledTodayTasks.reduce(
     (acc, t) => acc + Math.max(0, t.durationMinutes || 0),
     0,
   );
