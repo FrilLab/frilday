@@ -48,6 +48,10 @@ The current scaffold is still mid-extraction: active domain and SQLite
 integration remain under `apps/desktop`, while `crates/frilday-core` is not
 yet wired into the desktop crate.
 
+The stable Routine/Plan/Session/Completion vocabulary and the compatibility
+mapping for the current desktop records are defined in
+[DOMAIN_MODEL.md](DOMAIN_MODEL.md).
+
 ### Future server delivery
 
 ```text
@@ -94,6 +98,7 @@ It is not part of the desktop v0.1 runtime and should not own domain rules.
 
 Responsible for reusable rules such as:
 
+- Routine, Plan, Session, and Completion domain semantics
 - task and time-planning logic
 - schedule rules
 - timer and time-entry rules
