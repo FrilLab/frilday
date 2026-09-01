@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import type { Completion, Task } from '../types';
-import { dayOfWeek } from '../date';
+import { dayOfWeek } from '../../../shared/utils/date';
 import { isScheduledOn } from '../../../domain/schedule';
 import { isDoneOn } from '../../../domain/completion';
 import { LocaleContext } from '../../../i18n/context';

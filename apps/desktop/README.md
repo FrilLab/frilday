@@ -49,4 +49,5 @@ macOS bundle output:
 
 - this app is the active product surface right now
 - the desktop runtime is local-first and does not require a local Axum server
+- server and shared core extraction are planned at the repo level
 - broader direction is documented in [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)

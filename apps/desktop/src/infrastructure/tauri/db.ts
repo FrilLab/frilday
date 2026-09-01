@@ -1,14 +1,23 @@
 import { isTauri } from './runtime';
+import { invoke } from '@tauri-apps/api/core';
+
+export type SqlStatement = {
+  sql: string;
+  bind: unknown[];
+};
 
 export type AppDb = {
   init(): Promise<void>;
   execute(sql: string, bind?: unknown[]): Promise<void>;
   select<T>(sql: string, bind?: unknown[]): Promise<T[]>;
+  executeTransaction(statements: SqlStatement[]): Promise<void>;
 };
 
+// Keep the existing database filename; changing it would bypass the native migration.
 const DB_URL = 'sqlite:daily_check.db';
 
 let dbPromise: Promise<import('@tauri-apps/plugin-sql').default> | null = null;
+let initPromise: Promise<void> | null = null;
 
 async function getDatabase(): Promise<import('@tauri-apps/plugin-sql').default> {
   if (!isTauri()) {
@@ -24,9 +33,7 @@ async function getDatabase(): Promise<import('@tauri-apps/plugin-sql').default> 
   return dbPromise;
 }
 
-async function init(): Promise<void> {
-  if (!isTauri()) return;
-
+async function initializeSchema(): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `
@@ -102,6 +109,19 @@ async function init(): Promise<void> {
   );
 }
 
+async function init(): Promise<void> {
+  if (!isTauri()) return;
+
+  if (!initPromise) {
+    initPromise = initializeSchema().catch((error) => {
+      initPromise = null;
+      throw error;
+    });
+  }
+
+  await initPromise;
+}
+
 async function execute(sql: string, bind: unknown[] = []): Promise<void> {
   if (!isTauri()) return;
   const db = await getDatabase();
@@ -116,8 +136,15 @@ async function select<T>(sql: string, bind: unknown[] = []): Promise<T[]> {
   return db.select<T[]>(sql, bind);
 }
 
+async function executeTransaction(statements: SqlStatement[]): Promise<void> {
+  if (!isTauri()) return;
+
+  await invoke('execute_app_transaction', { statements });
+}
+
 export const appDb: AppDb = {
   init,
   execute,
   select,
+  executeTransaction,
 };

@@ -8,7 +8,7 @@ import type {
   TimeEntry,
 } from '../../shared/types';
 import type { TodayStats } from '../../domain/stats/stats';
-import { diffMinutes } from '../../shared/utils/date';
+import { getTrackedMinutes } from '../../domain/timeTracking';
 import { LocaleContext } from '../../i18n/context';
 
 // (role: clamp helper, type: (number, number, number)=>number)
@@ -55,7 +55,7 @@ export function TodayPage(props: {
   timeEntries: TimeEntry[]; // (role: time tracking logs, type: TimeEntry[])
 
   nowIso: string; // (role: ui clock iso, type: string)
-  runningTaskIdToday: string | null; // (role: single running task id, type: string | null)
+  runningTaskId: string | null; // (role: single running task id, type: string | null)
 
   getMemoText: (taskId: string, date: string) => string;
   onSaveMemo: (input: { taskId: string; date: string; text: string }) => void;
@@ -78,7 +78,7 @@ export function TodayPage(props: {
     completions,
     timeEntries,
     nowIso,
-    runningTaskIdToday,
+    runningTaskId,
     getMemoText,
     onSaveMemo,
     onToggleToday,
@@ -88,18 +88,16 @@ export function TodayPage(props: {
     onError,
   } = props;
 
-  const plannedMinutesToday = todayTasks.reduce(
+  const scheduledTodayTasks = todayTasks.filter((task) =>
+    task.daysOfWeek.includes(todayDow),
+  );
+
+  const plannedMinutesToday = scheduledTodayTasks.reduce(
     (acc, t) => acc + Math.max(0, t.durationMinutes || 0),
     0,
   );
 
   const todayTaskIdSet = new Set(todayTasks.map((t) => t.id));
-
-  const doneTaskIdSet = new Set(
-    (completions ?? [])
-      .filter((c) => c.date === todayYmd && todayTaskIdSet.has(c.taskId))
-      .map((c) => c.taskId),
-  );
 
   const measuredByTaskId = new Map<string, number>();
 
@@ -107,8 +105,7 @@ export function TodayPage(props: {
     if (e.date !== todayYmd) return;
     if (!todayTaskIdSet.has(e.taskId)) return;
 
-    const minutes =
-      e.endedAt == null ? diffMinutes(e.startedAt, nowIso) : e.minutes || 0;
+    const minutes = getTrackedMinutes(e, nowIso);
 
     measuredByTaskId.set(
       e.taskId,
@@ -116,11 +113,10 @@ export function TodayPage(props: {
     );
   });
 
-  const spentMinutesToday = todayTasks.reduce((acc, t) => {
-    const planned = Math.max(0, t.durationMinutes || 0);
-    if (doneTaskIdSet.has(t.id)) return acc + planned;
-    return acc + (measuredByTaskId.get(t.id) || 0);
-  }, 0);
+  const spentMinutesToday = todayTasks.reduce(
+    (acc, t) => acc + (measuredByTaskId.get(t.id) || 0),
+    0,
+  );
 
   const timeProgressPct =
     plannedMinutesToday <= 0
@@ -241,7 +237,7 @@ export function TodayPage(props: {
             todayYmd={todayYmd}
             todayDow={todayDow}
             nowIso={nowIso}
-            runningTaskIdToday={runningTaskIdToday}
+            runningTaskId={runningTaskId}
             getMemoText={getMemoText}
             onSaveMemo={onSaveMemo}
             onToggleToday={onToggleToday}

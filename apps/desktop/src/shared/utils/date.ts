@@ -50,6 +50,9 @@ export function buildWeekDates(weekStartYmd: string): string[] {
 export function diffMinutes(startIso: string, endIso: string): number {
   const start = new Date(startIso).getTime();
   const end = new Date(endIso).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+
   const ms = Math.max(0, end - start);
   return Math.floor(ms / 60000);
 }

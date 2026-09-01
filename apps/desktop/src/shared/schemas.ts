@@ -47,12 +47,25 @@ const RepeatCountSchema = z.preprocess((value) => {
   return num;
 }, z.number().int().min(1).nullable());
 
+const YmdSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }, 'Invalid calendar date');
+
+const IsoTimestampSchema = z.string().datetime({ offset: true });
+
 const StartYmdSchema = z.preprocess((value) => {
   if (value === '' || value == null) return null;
-  if (typeof value !== 'string') return null;
-  const ymd = value.trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
-}, z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable());
+  return typeof value === 'string' ? value.trim() : value;
+}, YmdSchema.nullable());
 
 // (role: task schema, type: zod schema)
 export const TaskSchema = z.object({
@@ -66,7 +79,7 @@ export const TaskSchema = z.object({
   autoArchiveAfter: AutoArchiveAfterSchema.optional().default(null),
   repeatCount: RepeatCountSchema.optional().default(null),
   isActive: z.boolean(),
-  createdAt: z.string().min(1),
+  createdAt: IsoTimestampSchema,
 });
 
 // (role: task list schema, type: zod schema)
@@ -75,7 +88,7 @@ export const TasksSchema = z.array(TaskSchema);
 // (role: completion schema, type: zod schema)
 export const CompletionSchema = z.object({
   taskId: z.string().min(1),
-  date: z.string().min(1),
+  date: YmdSchema,
 });
 
 // (role: completions schema, type: zod schema)
@@ -85,14 +98,10 @@ export const CompletionsSchema = z.array(CompletionSchema);
 export const TimeEntrySchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
-  date: z.string().min(1),
-  startedAt: z.string().min(1),
-  endedAt: z.string().nullable(),
-  minutes: z
-    .number()
-    .int()
-    .min(0)
-    .max(24 * 60),
+  date: YmdSchema,
+  startedAt: IsoTimestampSchema,
+  endedAt: IsoTimestampSchema.nullable(),
+  minutes: z.number().int().min(0),
 });
 
 // (role: time entry list schema, type: zod schema)
@@ -102,9 +111,9 @@ export const TimeEntriesSchema = z.array(TimeEntrySchema);
 export const TaskDailyMemoSchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
-  date: z.string().min(1),
+  date: YmdSchema,
   text: z.string(),
-  updatedAt: z.string().min(1),
+  updatedAt: IsoTimestampSchema,
 });
 
 // (role: memo list schema, type: zod schema)

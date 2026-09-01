@@ -16,6 +16,10 @@ import {
 import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
+import {
+  autoStopEntriesAtTarget,
+  closeRunningEntries,
+} from '../../domain/timeTracking/timer';
 
 export type Filter = 'all' | Category;
 
@@ -62,7 +66,7 @@ interface FrilDayState {
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => void;
   stopTimer: (input: { taskId: string; today: Date }) => void;
-  autoStopIfReached: (input: { today: Date }) => string[];
+  autoStopIfReached: () => string[];
 }
 
 function uid(): string {
@@ -314,14 +318,9 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       (c) => c.taskId === taskId && c.date === date,
     );
 
-    let nextTimeEntries = get().timeEntries;
     let nextTasks = get().tasks;
 
-    if (wasDone) {
-      nextTimeEntries = nextTimeEntries.filter(
-        (e) => !(e.taskId === taskId && e.date === date),
-      );
-    } else {
+    if (!wasDone) {
       const toggledTask = nextTasks.find((t) => t.id === taskId);
       if (
         toggledTask &&
@@ -343,14 +342,14 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     const next = {
       tasks: nextTasks,
       completions: nextCompletions,
-      timeEntries: nextTimeEntries,
+      timeEntries: get().timeEntries,
       taskDailyMemos: get().taskDailyMemos,
     };
 
     set({
       tasks: nextTasks,
       completions: nextCompletions,
-      timeEntries: nextTimeEntries,
+      timeEntries: get().timeEntries,
       errorMsg: '',
     });
     persistCollections(next, 'Failed to update completion.');
@@ -381,20 +380,14 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
 
     const entries = get().timeEntries;
     const alreadyRunningSameTask = entries.some(
-      (e) => e.taskId === taskId && e.date === date && e.endedAt == null,
+      (e) => e.taskId === taskId && e.endedAt == null,
     );
     if (alreadyRunningSameTask) {
       set({ errorMsg: 'Timer is already running for this task today.' });
       return;
     }
 
-    const nextTimeEntries = entries.map((e) => {
-      if (e.date !== date) return e;
-      if (e.endedAt != null) return e;
-
-      const minutes = diffMinutes(e.startedAt, nowIso);
-      return { ...e, endedAt: nowIso, minutes };
-    });
+    const nextTimeEntries = closeRunningEntries(entries, nowIso);
 
     const entry: TimeEntry = {
       id: uid(),
@@ -420,7 +413,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     const date = toYmd(today);
 
     const idx = get().timeEntries.findIndex(
-      (e) => e.taskId === taskId && e.date === date && e.endedAt == null,
+      (e) => e.taskId === taskId && e.date <= date && e.endedAt == null,
     );
     if (idx === -1) {
       set({ errorMsg: 'No running timer for this task today.' });
@@ -446,84 +439,48 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     persistCollections(next, 'Failed to stop timer.');
   },
 
-  autoStopIfReached: ({ today }) => {
+  autoStopIfReached: () => {
     if (!get().hydrated) return [];
 
-    const date = toYmd(today);
     const nowIso = new Date().toISOString();
+    const result = autoStopEntriesAtTarget(
+      get().timeEntries,
+      get().tasks,
+      get().completions,
+      nowIso,
+    );
 
-    const entries = get().timeEntries;
-    const tasks = get().tasks;
+    if (result.finishedTasks.length === 0) return [];
 
-    const nextEntries = [...entries];
-    const nextCompletions = [...get().completions];
-    const finishedTaskTitles: string[] = [];
-    let changed = false;
+    const notifier = getNotifier();
+    for (const finishedTask of result.finishedTasks) {
+      notifier.notify({
+        level: 'info',
+        message: `Auto-stopped: ${finishedTask.title} (+${finishedTask.minutes}m)`,
+      });
 
-    for (let i = 0; i < nextEntries.length; i += 1) {
-      const e = nextEntries[i];
-
-      if (e.date !== date) continue;
-      if (e.endedAt != null) continue;
-
-      const task = tasks.find((t) => t.id === e.taskId);
-      if (!task) continue;
-
-      const doneMinutes = nextEntries
-        .filter(
-          (x) =>
-            x.taskId === e.taskId &&
-            x.date === date &&
-            x.endedAt != null &&
-            Number.isFinite(x.minutes),
-        )
-        .reduce((acc, x) => acc + (x.minutes || 0), 0);
-
-      const runningMinutes = diffMinutes(e.startedAt, nowIso);
-      const total = doneMinutes + runningMinutes;
-
-      if (total >= task.durationMinutes) {
-        nextEntries[i] = { ...e, endedAt: nowIso, minutes: runningMinutes };
-        finishedTaskTitles.push(task.title);
-        changed = true;
-
-        const notifier = getNotifier();
+      if (finishedTask.autoCompleted) {
         notifier.notify({
-          level: 'info',
-          message: `Auto-stopped: ${task.title} (+${runningMinutes}m)`,
+          level: 'success',
+          message: `Auto-completed: ${finishedTask.title}`,
         });
-
-        const alreadyDone = nextCompletions.some(
-          (c) => c.taskId === e.taskId && c.date === date,
-        );
-
-        if (!alreadyDone) {
-          nextCompletions.push({ taskId: e.taskId, date });
-
-          notifier.notify({
-            level: 'success',
-            message: `Auto-completed: ${task.title}`,
-          });
-        }
       }
     }
 
-    if (!changed) return [];
-
     const next = {
       tasks: get().tasks,
-      completions: nextCompletions,
-      timeEntries: nextEntries,
+      completions: result.completions,
+      timeEntries: result.timeEntries,
       taskDailyMemos: get().taskDailyMemos,
     };
 
     set({
-      timeEntries: nextEntries,
-      completions: nextCompletions,
+      timeEntries: result.timeEntries,
+      completions: result.completions,
       errorMsg: '',
     });
     persistCollections(next, 'Failed to auto-stop timer.');
 
-    return finishedTaskTitles;
+    return result.finishedTasks.map((finishedTask) => finishedTask.title);
   },
 }));

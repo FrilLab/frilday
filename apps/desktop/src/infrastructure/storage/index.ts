@@ -11,12 +11,13 @@ import type {
   TaskDailyMemo,
   TimeEntry,
 } from '../../shared/types';
-import { appDb } from '../tauri/db';
+import { appDb, type SqlStatement } from '../tauri/db';
 import { isTauri } from '../tauri/runtime';
 
 // These keys are persisted data identifiers. Keep them stable unless an
 // explicit data migration accompanies a future rename.
 const STORAGE_KEYS = {
+  // These names are persisted legacy keys. Keep them stable for migration.
   tasks: 'dailycheck.tasks.v2',
   completions: 'dailycheck.completions.v1',
   timeEntries: 'dailycheck.timeEntries.v1',
@@ -30,6 +31,17 @@ type PersistedAppData = {
   completions: Completion[];
   timeEntries: TimeEntry[];
   taskDailyMemos: TaskDailyMemo[];
+};
+
+type LegacyCollection<T> = {
+  value: T;
+  valid: boolean;
+};
+
+type LegacyAppData = {
+  data: PersistedAppData;
+  valid: boolean;
+  hasData: boolean;
 };
 
 type MetaRow = {
@@ -74,15 +86,25 @@ type TaskDailyMemoRow = {
 
 function parseLegacyJson<T>(
   key: string,
-  parse: (value: unknown) => T,
+  schema: {
+    safeParse: (
+      value: unknown,
+    ) => { success: true; data: T } | { success: false };
+  },
   fallback: T,
-): T {
+): LegacyCollection<T> {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return parse(JSON.parse(raw) as unknown);
+    if (raw == null) {
+      return { value: fallback, valid: true };
+    }
+
+    const result = schema.safeParse(JSON.parse(raw) as unknown);
+    return result.success
+      ? { value: result.data, valid: true }
+      : { value: fallback, valid: false };
   } catch {
-    return fallback;
+    return { value: fallback, valid: false };
   }
 }
 
@@ -179,149 +201,174 @@ async function hasExistingData(): Promise<boolean> {
   );
 }
 
-async function replaceTasks(tasks: Task[]): Promise<void> {
-  await appDb.execute('DELETE FROM tasks');
-
-  for (const task of tasks) {
-    await appDb.execute(
-      `
-        INSERT INTO tasks (
-          id,
-          title,
-          description,
-          category,
-          days_of_week,
-          duration_minutes,
-          start_ymd,
-          auto_archive_after,
-          repeat_count,
-          is_active,
-          created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        task.id,
-        task.title,
-        task.description,
-        task.category,
-        JSON.stringify(task.daysOfWeek),
-        task.durationMinutes,
-        task.startYmd ?? null,
-        task.autoArchiveAfter ?? null,
-        task.repeatCount ?? null,
-        task.isActive ? 1 : 0,
-        task.createdAt,
-      ],
-    );
-  }
+function statement(sql: string, bind: unknown[] = []): SqlStatement {
+  return { sql, bind };
 }
 
-async function replaceCompletions(completions: Completion[]): Promise<void> {
-  await appDb.execute('DELETE FROM completions');
-
-  for (const completion of completions) {
-    await appDb.execute(
-      'INSERT INTO completions (task_id, date) VALUES (?, ?)',
-      [completion.taskId, completion.date],
-    );
-  }
+function buildTaskStatements(tasks: Task[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM tasks'),
+    ...tasks.map((task) =>
+      statement(
+        `
+          INSERT INTO tasks (
+            id,
+            title,
+            description,
+            category,
+            days_of_week,
+            duration_minutes,
+            start_ymd,
+            auto_archive_after,
+            repeat_count,
+            is_active,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          task.id,
+          task.title,
+          task.description,
+          task.category,
+          JSON.stringify(task.daysOfWeek),
+          task.durationMinutes,
+          task.startYmd ?? null,
+          task.autoArchiveAfter ?? null,
+          task.repeatCount ?? null,
+          task.isActive ? 1 : 0,
+          task.createdAt,
+        ],
+      ),
+    ),
+  ];
 }
 
-async function replaceTimeEntries(timeEntries: TimeEntry[]): Promise<void> {
-  await appDb.execute('DELETE FROM time_entries');
-
-  for (const entry of timeEntries) {
-    await appDb.execute(
-      `
-        INSERT INTO time_entries (
-          id,
-          task_id,
-          date,
-          started_at,
-          ended_at,
-          minutes
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [
-        entry.id,
-        entry.taskId,
-        entry.date,
-        entry.startedAt,
-        entry.endedAt,
-        entry.minutes,
-      ],
-    );
-  }
+function buildCompletionStatements(
+  completions: Completion[],
+): SqlStatement[] {
+  return [
+    statement('DELETE FROM completions'),
+    ...completions.map((completion) =>
+      statement('INSERT INTO completions (task_id, date) VALUES (?, ?)', [
+        completion.taskId,
+        completion.date,
+      ]),
+    ),
+  ];
 }
 
-async function replaceTaskDailyMemos(
-  taskDailyMemos: TaskDailyMemo[],
-): Promise<void> {
-  await appDb.execute('DELETE FROM task_daily_memos');
+function buildTimeEntryStatements(timeEntries: TimeEntry[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM time_entries'),
+    ...timeEntries.map((entry) =>
+      statement(
+        `
+          INSERT INTO time_entries (
+            id,
+            task_id,
+            date,
+            started_at,
+            ended_at,
+            minutes
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [
+          entry.id,
+          entry.taskId,
+          entry.date,
+          entry.startedAt,
+          entry.endedAt,
+          entry.minutes,
+        ],
+      ),
+    ),
+  ];
+}
 
-  for (const memo of taskDailyMemos) {
-    await appDb.execute(
-      `
-        INSERT INTO task_daily_memos (
-          id,
-          task_id,
-          date,
-          text,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?)
-      `,
-      [memo.id, memo.taskId, memo.date, memo.text, memo.updatedAt],
-    );
-  }
+function buildMemoStatements(taskDailyMemos: TaskDailyMemo[]): SqlStatement[] {
+  return [
+    statement('DELETE FROM task_daily_memos'),
+    ...taskDailyMemos.map((memo) =>
+      statement(
+        `
+          INSERT INTO task_daily_memos (
+            id,
+            task_id,
+            date,
+            text,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        [memo.id, memo.taskId, memo.date, memo.text, memo.updatedAt],
+      ),
+    ),
+  ];
+}
+
+function buildSnapshotStatements(data: PersistedAppData): SqlStatement[] {
+  return [
+    ...buildTaskStatements(data.tasks),
+    ...buildCompletionStatements(data.completions),
+    ...buildTimeEntryStatements(data.timeEntries),
+    ...buildMemoStatements(data.taskDailyMemos),
+  ];
+}
+
+let writeQueue: Promise<void> = Promise.resolve();
+
+function enqueueWrite(operation: () => Promise<void>): Promise<void> {
+  const queued = writeQueue.then(operation, operation);
+  writeQueue = queued.catch(() => undefined);
+  return queued;
 }
 
 async function saveAppData(data: PersistedAppData): Promise<void> {
   if (!isTauri()) return;
 
   await appDb.init();
-  await replaceTasks(data.tasks);
-  await replaceCompletions(data.completions);
-  await replaceTimeEntries(data.timeEntries);
-  await replaceTaskDailyMemos(data.taskDailyMemos);
+  await appDb.executeTransaction(buildSnapshotStatements(data));
 }
 
-function loadLegacyAppData(): PersistedAppData {
+function loadLegacyAppData(): LegacyAppData {
+  const tasks = parseLegacyJson(STORAGE_KEYS.tasks, TasksSchema, [] as Task[]);
+  const completions = parseLegacyJson(
+    STORAGE_KEYS.completions,
+    CompletionsSchema,
+    [] as Completion[],
+  );
+  const timeEntries = parseLegacyJson(
+    STORAGE_KEYS.timeEntries,
+    TimeEntriesSchema,
+    [] as TimeEntry[],
+  );
+  const taskDailyMemos = parseLegacyJson(
+    STORAGE_KEYS.taskDailyMemos,
+    TaskDailyMemosSchema,
+    [] as TaskDailyMemo[],
+  );
+
+  const data = {
+    tasks: tasks.value,
+    completions: completions.value,
+    timeEntries: timeEntries.value,
+    taskDailyMemos: taskDailyMemos.value,
+  };
+
   return {
-    tasks: parseLegacyJson(
-      STORAGE_KEYS.tasks,
-      (decoded) => {
-        const result = TasksSchema.safeParse(decoded);
-        return result.success ? (result.data as Task[]) : [];
-      },
-      [],
-    ),
-    completions: parseLegacyJson(
-      STORAGE_KEYS.completions,
-      (decoded) => {
-        const result = CompletionsSchema.safeParse(decoded);
-        return result.success ? (result.data as Completion[]) : [];
-      },
-      [],
-    ),
-    timeEntries: parseLegacyJson(
-      STORAGE_KEYS.timeEntries,
-      (decoded) => {
-        const result = TimeEntriesSchema.safeParse(decoded);
-        return result.success ? (result.data as TimeEntry[]) : [];
-      },
-      [],
-    ),
-    taskDailyMemos: parseLegacyJson(
-      STORAGE_KEYS.taskDailyMemos,
-      (decoded) => {
-        const result = TaskDailyMemosSchema.safeParse(decoded);
-        return result.success ? (result.data as TaskDailyMemo[]) : [];
-      },
-      [],
-    ),
+    data,
+    valid:
+      tasks.valid &&
+      completions.valid &&
+      timeEntries.valid &&
+      taskDailyMemos.valid,
+    hasData:
+      tasks.value.length > 0 ||
+      completions.value.length > 0 ||
+      timeEntries.value.length > 0 ||
+      taskDailyMemos.value.length > 0,
   };
 }
 
@@ -341,21 +388,22 @@ async function migrateLegacyStorageIfNeeded(): Promise<void> {
     return;
   }
 
+  const legacyData = loadLegacyAppData();
+  if (!legacyData.valid) {
+    console.error(
+      'Legacy app data is invalid; leaving it untouched for recovery.',
+    );
+    return;
+  }
+
   if (await hasExistingData()) {
     await setMeta(LEGACY_STORAGE_MIGRATION_KEY, '1');
     clearLegacyAppData();
     return;
   }
 
-  const legacyData = loadLegacyAppData();
-  const hasLegacyData =
-    legacyData.tasks.length > 0 ||
-    legacyData.completions.length > 0 ||
-    legacyData.timeEntries.length > 0 ||
-    legacyData.taskDailyMemos.length > 0;
-
-  if (hasLegacyData) {
-    await saveAppData(legacyData);
+  if (legacyData.hasData) {
+    await saveAppData(legacyData.data);
   }
 
   clearLegacyAppData();
@@ -440,48 +488,46 @@ export async function loadAppData(): Promise<PersistedAppData> {
 }
 
 export async function saveTasks(tasks: Task[]): Promise<void> {
-  await saveAppData({
-    tasks,
-    completions: await loadCompletions(),
-    timeEntries: await loadTimeEntries(),
-    taskDailyMemos: await loadTaskDailyMemos(),
+  return enqueueWrite(async () => {
+    await migrateLegacyStorageIfNeeded();
+    const current = await loadAppData();
+    await saveAppData({ ...current, tasks });
   });
 }
 
 export async function saveCompletions(
   completions: Completion[],
 ): Promise<void> {
-  await saveAppData({
-    tasks: await loadTasks(),
-    completions,
-    timeEntries: await loadTimeEntries(),
-    taskDailyMemos: await loadTaskDailyMemos(),
+  return enqueueWrite(async () => {
+    await migrateLegacyStorageIfNeeded();
+    const current = await loadAppData();
+    await saveAppData({ ...current, completions });
   });
 }
 
 export async function saveTimeEntries(timeEntries: TimeEntry[]): Promise<void> {
-  await saveAppData({
-    tasks: await loadTasks(),
-    completions: await loadCompletions(),
-    timeEntries,
-    taskDailyMemos: await loadTaskDailyMemos(),
+  return enqueueWrite(async () => {
+    await migrateLegacyStorageIfNeeded();
+    const current = await loadAppData();
+    await saveAppData({ ...current, timeEntries });
   });
 }
 
 export async function saveTaskDailyMemos(
   taskDailyMemos: TaskDailyMemo[],
 ): Promise<void> {
-  await saveAppData({
-    tasks: await loadTasks(),
-    completions: await loadCompletions(),
-    timeEntries: await loadTimeEntries(),
-    taskDailyMemos,
+  return enqueueWrite(async () => {
+    await migrateLegacyStorageIfNeeded();
+    const current = await loadAppData();
+    await saveAppData({ ...current, taskDailyMemos });
   });
 }
 
 export async function replaceAllAppData(data: PersistedAppData): Promise<void> {
-  await migrateLegacyStorageIfNeeded();
-  await saveAppData(data);
+  return enqueueWrite(async () => {
+    await migrateLegacyStorageIfNeeded();
+    await saveAppData(data);
+  });
 }
 
 export async function loadTasks(): Promise<Task[]> {

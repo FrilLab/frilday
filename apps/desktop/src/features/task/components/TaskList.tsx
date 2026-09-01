@@ -11,7 +11,7 @@ interface TaskListProps {
   todayDow: DayOfWeek;
 
   nowIso: string; // (role: ui clock iso, type: string)
-  runningTaskIdToday: string | null; // (role: single running task id, type: string | null)
+  runningTaskId: string | null; // (role: single running task id, type: string | null)
 
   getMemoText?: (taskId: string, date: string) => string;
 
@@ -59,7 +59,7 @@ export function TaskList(props: TaskListProps) {
           todayYmd={props.todayYmd}
           todayDow={props.todayDow}
           nowIso={props.nowIso}
-          runningTaskIdToday={props.runningTaskIdToday}
+          runningTaskId={props.runningTaskId}
           variant={props.variant}
           onToggleToday={props.onToggleToday}
           onArchive={props.onArchive}

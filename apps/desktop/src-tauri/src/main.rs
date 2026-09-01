@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  frilday_desktop_lib::run();
+    frilday_desktop_lib::run();
 }
