@@ -8,7 +8,6 @@ import { ManagePage } from './pages/ManagePage';
 import { SchedulePage } from './pages/SchedulePage';
 
 import { useAppModel } from './hooks/useAppModel';
-import { useAutoStopTick } from '../features/task/hooks/useAutoStopTick';
 
 import type { Task } from '../shared/types';
 
@@ -23,9 +22,6 @@ import { SettingsPage } from './pages/SettingsPage';
 initNotifier();
 
 export default function App() {
-  // (role: app-wide timer auto-stop tick, type: () => void)
-  useAutoStopTick();
-
   const m = useAppModel();
   const { t } = useContext(LocaleContext);
 
@@ -92,6 +88,8 @@ export default function App() {
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                activeTimerTask={m.activeTimerTask}
+                activeTimerPhase={m.activeTimerPhase}
                 getMemoText={m.getMemoText}
                 onSaveMemo={m.handleSaveDailyMemo}
                 onToggleToday={(task: Task) =>
@@ -101,6 +99,10 @@ export default function App() {
                 onError={m.setError}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
+                onPauseTimer={m.handlePauseTimer}
+                onResumeTimer={m.handleResumeTimer}
+                onFinishTimer={m.handleFinishTimer}
+                onBackToPlan={m.handleBackToPlan}
               />
             )}
 

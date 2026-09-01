@@ -291,7 +291,7 @@ export function TaskListItem(props: TaskListItemProps) {
               {running ? (
                 <span className="flex items-center gap-1">
                   <Pause size={14} />
-                  {tr('time.stop')}
+                  {tr('timer.pause')}
                 </span>
               ) : (
                 <span className="flex items-center gap-1">

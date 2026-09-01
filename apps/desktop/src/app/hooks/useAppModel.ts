@@ -4,6 +4,7 @@ import { dayOfWeek, startOfWeekMonday, toYmd } from '../../shared/utils/date';
 import type { Task, TaskDayState } from '../../shared/types';
 import type { Tab } from '../layout/HeaderTabs';
 import type { CreateTaskInput } from '../../features/task/components/TaskForm';
+import type { ActiveTimerPhase } from '../../features/timer/activeTimerModel';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
 import {
@@ -95,6 +96,11 @@ export function useAppModel() {
   const weekStartYmd = toYmd(startOfWeekMonday(today));
 
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [activeTimerTaskId, setActiveTimerTaskId] = useState<string | null>(
+    null,
+  );
+  const [activeTimerPhase, setActiveTimerPhase] =
+    useState<ActiveTimerPhase>('ready');
   const [scheduleSlots, setScheduleSlots] = useState<
     Awaited<ReturnType<typeof getVisibleScheduleSlots>>
   >([]);
@@ -257,6 +263,33 @@ export function useAppModel() {
     );
   }, [tasks, showArchived, manageCategory, manageQuery]);
 
+  const activeTimerTask = useMemo(() => {
+    if (activeTimerTaskId != null) {
+      const selected = tasks.find((task) => task.id === activeTimerTaskId);
+      if (selected) return selected;
+    }
+
+    if (runningTaskId != null) {
+      const running = tasks.find((task) => task.id === runningTaskId);
+      if (running) return running;
+    }
+
+    return todayTasks.find((task) => !visibleToday.get(task.id)?.completed) ?? null;
+  }, [activeTimerTaskId, runningTaskId, tasks, todayTasks, visibleToday]);
+
+  const activeTimerPhaseForView: ActiveTimerPhase =
+    activeTimerTask == null
+      ? 'ready'
+      : runningTaskId === activeTimerTask.id
+        ? 'running'
+        : activeTimerTaskId === activeTimerTask.id
+          ? activeTimerPhase === 'paused'
+            ? 'paused'
+            : activeTimerPhase === 'finished'
+              ? 'finished'
+              : 'ready'
+          : 'ready';
+
   const setError = (msg: string) =>
     useFrilDayStore.setState({ errorMsg: msg });
 
@@ -323,6 +356,8 @@ export function useAppModel() {
 
   // 실시간을 위해 today(useMemo) 대신 현재 날짜 받기
   const handleStartTimer = (task: Task) => {
+    setActiveTimerTaskId(task.id);
+    setActiveTimerPhase('running');
     startTimer({ taskId: task.id, today: new Date() });
 
     notifier.notify({
@@ -332,11 +367,44 @@ export function useAppModel() {
   };
 
   const handleStopTimer = (task: Task) => {
+    setActiveTimerTaskId(task.id);
+    setActiveTimerPhase('paused');
     stopTimer({ taskId: task.id, today: new Date() });
     notifier.notify({
       level: 'info',
-      message: `Timer stopped`,
+      message: `Timer paused`,
     });
+  };
+
+  const handleResumeTimer = (task: Task) => {
+    setActiveTimerTaskId(task.id);
+    setActiveTimerPhase('running');
+    startTimer({ taskId: task.id, today: new Date() });
+
+    notifier.notify({
+      level: 'info',
+      message: `Timer resumed`,
+    });
+  };
+
+  const handleFinishTimer = async (task: Task) => {
+    const hasRunningEntry = timeEntries.some(
+      (entry) => entry.taskId === task.id && entry.endedAt == null,
+    );
+    if (runningTaskId === task.id || hasRunningEntry) {
+      await stopTimer({ taskId: task.id, today: new Date() });
+    }
+
+    setActiveTimerPhase('finished');
+    notifier.notify({
+      level: 'info',
+      message: `Timer finished`,
+    });
+  };
+
+  const handleBackToPlan = () => {
+    setActiveTimerTaskId(null);
+    setActiveTimerPhase('ready');
   };
 
   return {
@@ -354,6 +422,8 @@ export function useAppModel() {
     todayDow,
     nowIso,
     runningTaskId,
+    activeTimerTask,
+    activeTimerPhase: activeTimerPhaseForView,
 
     // view state
     tab,
@@ -392,5 +462,9 @@ export function useAppModel() {
     // timer actions (UI용)
     handleStartTimer,
     handleStopTimer,
+    handlePauseTimer: handleStopTimer,
+    handleResumeTimer,
+    handleFinishTimer,
+    handleBackToPlan,
   };
 }
