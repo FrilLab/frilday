@@ -5,3 +5,6 @@ members = [
     "apps/server",
     "apps/desktop/src-tauri",
 ]
+
+[workspace.package]
+rust-version = "1.85.0"

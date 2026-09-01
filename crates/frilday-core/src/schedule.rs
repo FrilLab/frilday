@@ -21,15 +21,12 @@ impl fmt::Display for ScheduleError {
 impl std::error::Error for ScheduleError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScheduleRule {
-    Weekdays,
-    Weekends,
-    Daily,
-    Custom(Vec<Weekday>),
+pub struct CustomSchedule {
+    days: Vec<Weekday>,
 }
 
-impl ScheduleRule {
-    pub fn custom(days: impl IntoIterator<Item = Weekday>) -> Result<Self, ScheduleError> {
+impl CustomSchedule {
+    pub fn new(days: impl IntoIterator<Item = Weekday>) -> Result<Self, ScheduleError> {
         let mut days = days.into_iter().peekable();
         if days.peek().is_none() {
             return Err(ScheduleError::EmptyCustomSchedule);
@@ -42,7 +39,29 @@ impl ScheduleRule {
             }
         }
         selected.sort_unstable();
-        Ok(Self::Custom(selected))
+        Ok(Self { days: selected })
+    }
+
+    pub fn days(&self) -> &[Weekday] {
+        &self.days
+    }
+
+    fn contains(&self, weekday: Weekday) -> bool {
+        self.days.contains(&weekday)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScheduleRule {
+    Weekdays,
+    Weekends,
+    Daily,
+    Custom(CustomSchedule),
+}
+
+impl ScheduleRule {
+    pub fn custom(days: impl IntoIterator<Item = Weekday>) -> Result<Self, ScheduleError> {
+        Ok(Self::Custom(CustomSchedule::new(days)?))
     }
 
     pub fn matches(&self, weekday: Weekday) -> bool {
@@ -50,7 +69,7 @@ impl ScheduleRule {
             Self::Weekdays => weekday.is_weekday(),
             Self::Weekends => !weekday.is_weekday(),
             Self::Daily => true,
-            Self::Custom(days) => days.contains(&weekday),
+            Self::Custom(days) => days.contains(weekday),
         }
     }
 
@@ -59,7 +78,7 @@ impl ScheduleRule {
             Self::Weekdays => Weekday::ALL[..5].to_vec(),
             Self::Weekends => Weekday::ALL[5..].to_vec(),
             Self::Daily => Weekday::ALL.to_vec(),
-            Self::Custom(days) => days.clone(),
+            Self::Custom(days) => days.days().to_vec(),
         }
     }
 }

@@ -45,6 +45,9 @@ domain vocabulary and legacy-record mapping are documented in
 The repository-level Cargo workspace includes the core crate, future server
 adapter, and Tauri Rust crate. From the repository root:
 
+The workspace requires Rust 1.85 or newer because the core and server use
+Edition 2024.
+
 ```bash
 cargo fmt --all -- --check
 cargo check --workspace

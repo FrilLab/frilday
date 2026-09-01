@@ -23,8 +23,8 @@ pub use ids::{IdError, PlanId, RoutineId, SessionId};
 pub use plan::{Plan, PlanStatus};
 pub use routine::{Routine, RoutineError};
 pub use schedule::{
-    ScheduleError, ScheduleRule, effective_start_on, eligible_dates_between, is_eligible_on,
-    visible_dates_between,
+    CustomSchedule, ScheduleError, ScheduleRule, effective_start_on, eligible_dates_between,
+    is_eligible_on, visible_dates_between,
 };
 pub use session::{
     Session, SessionError, SessionLedger, running_session, validate_no_concurrent_sessions,
@@ -80,6 +80,20 @@ mod tests {
                 &completions,
             ),
             vec![monday, monday.checked_add_days(1).unwrap()]
+        );
+    }
+
+    #[test]
+    fn custom_schedule_requires_a_day_and_normalizes_duplicates() {
+        assert_eq!(
+            ScheduleRule::custom([Weekday::Fri, Weekday::Mon, Weekday::Fri])
+                .unwrap()
+                .days(),
+            vec![Weekday::Mon, Weekday::Fri]
+        );
+        assert_eq!(
+            ScheduleRule::custom(std::iter::empty()),
+            Err(ScheduleError::EmptyCustomSchedule)
         );
     }
 
