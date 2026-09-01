@@ -2,5 +2,8 @@
 name = "frilday-core"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
+description = "Reusable FrilDay planning and time-tracking domain rules"
+repository = "https://github.com/FrilLab/frilday"
 
 [dependencies]
