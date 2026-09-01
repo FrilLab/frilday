@@ -61,7 +61,8 @@ cargo test --workspace
   desktop runtime.
 - The desktop React layer uses the Tauri adapter for schedule, completion,
   session, timer, and statistics calculations backed by `frilday-core`;
-  SQLite persistence remains local adapter code.
+  typed SQLite persistence commands are implemented by the Rust-side local
+  adapter.
 
 ## Desktop app
 

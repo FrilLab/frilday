@@ -11,7 +11,20 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
-            persistence::execute_app_transaction,
+            persistence::initialize_app_database,
+            persistence::load_app_data,
+            persistence::import_legacy_app_data,
+            persistence::save_task,
+            persistence::set_task_active,
+            persistence::delete_task,
+            persistence::set_completion,
+            persistence::save_time_entries,
+            persistence::save_auto_stop_transition,
+            persistence::save_task_daily_memo,
+            persistence::get_setting,
+            persistence::set_setting,
+            persistence::get_migration_marker,
+            persistence::set_migration_marker,
             core_commands::core_visible_schedule,
             core_commands::core_toggle_completion,
             core_commands::core_statistics,

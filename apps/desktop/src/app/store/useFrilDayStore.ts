@@ -7,9 +7,21 @@ import type {
   TaskDailyMemo,
   TimeEntry,
 } from '../../shared/types';
-import { loadAppData, replaceAllAppData } from '../../infrastructure/storage';
+import {
+  deleteTask as deletePersistedTask,
+  loadAppData,
+  saveTask,
+  saveAutoStopTransition,
+  saveTaskDailyMemo,
+  saveTimeEntries,
+  setCompletion,
+  setTaskActive,
+} from '../../infrastructure/storage';
 import { toYmd } from '../../shared/utils/date';
-import { createSerialQueue } from '../../shared/utils/serialQueue';
+import {
+  createSerialQueue,
+  type AsyncOperation,
+} from '../../shared/utils/serialQueue';
 import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
@@ -21,11 +33,6 @@ import {
 } from '../../infrastructure/tauri/core';
 
 export type Filter = 'all' | Category;
-
-type PersistedCollections = Pick<
-  FrilDayState,
-  'tasks' | 'completions' | 'timeEntries' | 'taskDailyMemos'
->;
 
 interface FrilDayState {
   hydrated: boolean;
@@ -88,11 +95,11 @@ function formatError(error: unknown): string {
   }
 }
 
-function persistCollections(
-  next: PersistedCollections,
+function persist(
+  operation: AsyncOperation,
   failureMessage: string,
 ): void {
-  void replaceAllAppData(next).catch((error) => {
+  void enqueuePersistence(operation).catch((error) => {
     console.error(failureMessage, error);
     useFrilDayStore.setState({
       errorMsg: `${failureMessage} ${formatError(error)}`,
@@ -100,6 +107,7 @@ function persistCollections(
   });
 }
 
+const enqueuePersistence = createSerialQueue();
 const enqueueCompletionToggle = createSerialQueue();
 
 export const useFrilDayStore = create<FrilDayState>((set, get) => ({
@@ -170,15 +178,9 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       });
 
       const nextTasks = [task, ...get().tasks];
-      const next = {
-        tasks: nextTasks,
-        completions: get().completions,
-        timeEntries: get().timeEntries,
-        taskDailyMemos: get().taskDailyMemos,
-      };
 
       set({ tasks: nextTasks, errorMsg: '' });
-      persistCollections(next, 'Failed to save task.');
+      persist(() => saveTask(task), 'Failed to save task.');
     } catch (e) {
       set({
         errorMsg: e instanceof Error ? e.message : 'Failed to create task.',
@@ -239,46 +241,34 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           }
         : task,
     );
-
-    const next = {
-      tasks: nextTasks,
-      completions: get().completions,
-      timeEntries: get().timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
+    const nextTask = nextTasks.find((task) => task.id === taskId);
 
     set({ tasks: nextTasks, errorMsg: '' });
-    persistCollections(next, 'Failed to update task.');
+    if (nextTask) persist(() => saveTask(nextTask), 'Failed to update task.');
   },
 
   archiveTask: (taskId) => {
     const nextTasks = get().tasks.map((t) =>
       t.id === taskId ? { ...t, isActive: false } : t,
     );
-    const next = {
-      tasks: nextTasks,
-      completions: get().completions,
-      timeEntries: get().timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
 
     set({ tasks: nextTasks, errorMsg: '' });
-    persistCollections(next, 'Failed to archive task.');
+    persist(
+      () => setTaskActive(taskId, false),
+      'Failed to archive task.',
+    );
   },
 
   restoreTask: (taskId) => {
     const nextTasks = get().tasks.map((t) =>
       t.id === taskId ? { ...t, isActive: true } : t,
     );
-    const next = {
-      tasks: nextTasks,
-      completions: get().completions,
-      timeEntries: get().timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
 
     set({ tasks: nextTasks, errorMsg: '' });
-    persistCollections(next, 'Failed to restore task.');
+    persist(
+      () => setTaskActive(taskId, true),
+      'Failed to restore task.',
+    );
   },
 
   deleteTask: (taskId) => {
@@ -291,18 +281,14 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     );
     const nextMemos = get().taskDailyMemos.filter((m) => m.taskId !== taskId);
 
-    const next = {
+    set({
       tasks: nextTasks,
       completions: nextCompletions,
       timeEntries: nextTimeEntries,
       taskDailyMemos: nextMemos,
-    };
-
-    set({
-      ...next,
       errorMsg: '',
     });
-    persistCollections(next, 'Failed to delete task.');
+    persist(() => deletePersistedTask(taskId), 'Failed to delete task.');
   },
 
   toggleToday: ({ taskId, today }) =>
@@ -339,29 +325,47 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         };
 
         set({ ...next, errorMsg: '' });
-        persistCollections(next, 'Failed to update completion.');
+        persist(
+          () =>
+            Promise.all([
+              setCompletion(
+                taskId,
+                date,
+                result.completions.some(
+                  (completion) =>
+                    completion.taskId === taskId && completion.date === date,
+                ),
+              ),
+              ...(result.autoArchived
+                ? [setTaskActive(taskId, false)]
+                : []),
+            ]).then(() => undefined),
+          'Failed to update completion.',
+        );
       } catch (error) {
         set({ errorMsg: `Failed to update completion. ${formatError(error)}` });
       }
     }),
 
   setDailyMemo: ({ taskId, date, text }) => {
+    const updatedAt = new Date().toISOString();
     const nextMemos = upsertDailyMemo(get().taskDailyMemos, {
       taskId,
       date,
       text,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
     });
 
-    const next = {
-      tasks: get().tasks,
-      completions: get().completions,
-      timeEntries: get().timeEntries,
-      taskDailyMemos: nextMemos,
+    const memo = {
+      id: `${taskId}_${date}`,
+      taskId,
+      date,
+      text: text.trim(),
+      updatedAt,
     };
 
     set({ taskDailyMemos: nextMemos, errorMsg: '' });
-    persistCollections(next, 'Failed to save memo.');
+    persist(() => saveTaskDailyMemo(memo), 'Failed to save memo.');
   },
 
   startTimer: async ({ taskId, today }) => {
@@ -377,15 +381,11 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         dateYmd: date,
         startedAt: nowIso,
       });
-      const next = {
-        tasks: get().tasks,
-        completions: get().completions,
-        timeEntries: nextTimeEntries,
-        taskDailyMemos: get().taskDailyMemos,
-      };
-
       set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persistCollections(next, 'Failed to start timer.');
+      persist(
+        () => saveTimeEntries(nextTimeEntries),
+        'Failed to start timer.',
+      );
     } catch (error) {
       set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
     }
@@ -401,15 +401,11 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         dateYmd: date,
         endedAt: nowIso,
       });
-      const next = {
-        tasks: get().tasks,
-        completions: get().completions,
-        timeEntries: nextTimeEntries,
-        taskDailyMemos: get().taskDailyMemos,
-      };
-
       set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persistCollections(next, 'Failed to stop timer.');
+      persist(
+        () => saveTimeEntries(nextTimeEntries),
+        'Failed to stop timer.',
+      );
     } catch (error) {
       set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
     }
@@ -449,19 +445,25 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       }
     }
 
-    const next = {
-      tasks: get().tasks,
-      completions: result.completions,
-      timeEntries: result.timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
+    const previousCompletions = get().completions;
+    const addedCompletions = result.completions.filter(
+      (completion) =>
+        !previousCompletions.some(
+          (previous) =>
+            previous.taskId === completion.taskId &&
+            previous.date === completion.date,
+        ),
+    );
 
     set({
       timeEntries: result.timeEntries,
       completions: result.completions,
       errorMsg: '',
     });
-    persistCollections(next, 'Failed to auto-stop timer.');
+    persist(
+      () => saveAutoStopTransition(result.timeEntries, addedCompletions),
+      'Failed to auto-stop timer.',
+    );
 
     return result.finishedTasks.map((finishedTask) => finishedTask.title);
   },
