@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useDailyCheckStore } from '../store/useDailyCheckStore';
+import { useFrilDayStore } from '../store/useFrilDayStore';
 import { dayOfWeek, startOfWeekMonday, toYmd } from '../../shared/utils/date';
 import { calcTodayStats, calcWeekStats } from '../../domain/stats/stats';
 import { isDoneOn } from '../../domain/completion';
@@ -28,7 +28,7 @@ export function useAppModel() {
     setDailyMemo,
     startTimer,
     stopTimer,
-  } = useDailyCheckStore();
+  } = useFrilDayStore();
 
   const [tab, setTab] = useState<Tab>('today');
 
@@ -127,7 +127,7 @@ export function useAppModel() {
   }, [tasks, showArchived, manageCategory, manageQuery]);
 
   const setError = (msg: string) =>
-    useDailyCheckStore.setState({ errorMsg: msg });
+    useFrilDayStore.setState({ errorMsg: msg });
 
   // Handlers
   const handleCreate = (input: CreateTaskInput) => {

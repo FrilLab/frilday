@@ -52,7 +52,7 @@ export default function App() {
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0 w-full flex justify-between ">
                 <h1 className="text-2xl font-semibold tracking-tight">
-                  DailyCheck
+                  FrilDay
                 </h1>
 
                 <div className="mb-3 block sm:hidden">

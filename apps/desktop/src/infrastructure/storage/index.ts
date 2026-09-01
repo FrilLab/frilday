@@ -14,6 +14,8 @@ import type {
 import { appDb } from '../tauri/db';
 import { isTauri } from '../tauri/runtime';
 
+// These keys are persisted data identifiers. Keep them stable unless an
+// explicit data migration accompanies a future rename.
 const STORAGE_KEYS = {
   tasks: 'dailycheck.tasks.v2',
   completions: 'dailycheck.completions.v1',

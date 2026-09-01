@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useDailyCheckStore } from '../../../app/store/useDailyCheckStore';
+import { useFrilDayStore } from '../../../app/store/useFrilDayStore';
 import { useLocale } from '../../../i18n/useLocale';
 import {
   platformNotifications,
@@ -15,7 +15,7 @@ export function useAutoStopTick() {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const finishedTaskTitles = useDailyCheckStore
+      const finishedTaskTitles = useFrilDayStore
         .getState()
         .autoStopIfReached({ today: new Date() });
 

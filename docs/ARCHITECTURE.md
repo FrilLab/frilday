@@ -1,107 +1,109 @@
 # FrilDay Architecture
 
-FrilDay is designed as a cloud-first productivity application, while the first release focuses on the desktop experience.
+FrilDay is a timer-first time planning application. Its core loop is
+**Plan → Execute → Track → Review → Adjust**, with planned time compared
+against actual time. Completion is a secondary signal rather than the product
+definition.
 
-The project starts with a Tauri desktop app and an Axum server, then gradually expands to mobile and cloud synchronization.
+Desktop v0.1 is local-first. The active timer and today's executable plan take
+priority over analytics and configuration. The future server is a separate
+delivery adapter, not a prerequisite for the desktop application.
 
 ## Goals
 
-- Release the desktop app first
-- Use Axum as the API layer
-- Keep business logic independent from UI and transport layers
-- Prepare for future mobile and cloud-first usage
-- Avoid duplicating task, schedule, and statistics logic across clients
+- Release and refine the local-first desktop experience first.
+- Keep planned-time and actual-time rules reusable across delivery adapters.
+- Keep UI and transport layers thin.
+- Leave room for future mobile, web, and cloud delivery without coupling the
+  core to a specific runtime.
+- Avoid infrastructure without a concrete release benefit.
 
-## High-Level Structure
+## High-level structure
 
 ```text
 frilday/
 
 apps/
-  desktop/     # Tauri + React desktop app
-  server/      # Axum HTTP API server
+  desktop/       Tauri + React desktop client
+  server/        Future Axum delivery adapter
 
 crates/
-  frilday-core/ # Core domain and application logic
+  frilday-core/  Reusable domain and application rules
 ```
 
-## Runtime Flow
+## Runtime flow
 
-### Desktop v0.1
+### Target desktop v0.1 architecture
 
 ```text
-React Desktop
-    ↓ HTTP
-Local Axum Server
-    ↓
-frilday-core
-    ↓
-SQLite
+React → Tauri adapter → frilday-core → SQLite adapter
 ```
 
-The desktop app calls the local Axum server through HTTP. This keeps the desktop client close to the future cloud API structure.
+This is the intended desktop v0.1 boundary. Once domain extraction is
+complete, the desktop application will use Tauri for native capabilities,
+`frilday-core` for reusable domain rules, and the SQLite adapter for local
+persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
 
-### Future Cloud Version
+The current scaffold is still mid-extraction: active domain and SQLite
+integration remain under `apps/desktop`, while `crates/frilday-core` is not
+yet wired into the desktop crate.
+
+### Future server delivery
 
 ```text
 Desktop / Mobile / Web
-    ↓ HTTP
-Cloud Axum Server
-    ↓
-frilday-core
-    ↓
-PostgreSQL
+            ↓ HTTP
+      Axum server adapter
+            ↓
+      frilday-core
+            ↓
+      Remote persistence
 ```
 
-The long-term goal is cloud-first usage, where user data is stored on the server and shared across devices.
+The Axum server can later provide cloud delivery and synchronization. It is a
+separate adapter and must not be inserted into the desktop v0.1 runtime just
+to mirror a future API.
 
-## Layer Responsibilities
+## Layer responsibilities
 
-### apps/desktop
-
-Responsible for:
-
-- React UI
-- Tauri shell
-- Pages and user interaction
-- Calling the API
-- Desktop packaging
-
-It should not contain core business rules.
-
-### apps/server
+### `apps/desktop`
 
 Responsible for:
+
+- React UI and user interaction
+- Tauri integration and native capabilities
+- desktop packaging
+- adapting local persistence to the application
+
+The desktop layer should prioritize the active timer and today's executable
+plan. It should not become a second home for reusable core business rules.
+
+### `apps/server`
+
+Responsible for the future delivery boundary:
 
 - Axum routes
 - HTTP request/response handling
-- API validation
-- Authentication in the future
-- Calling `frilday-core`
+- transport-level validation
+- authentication and synchronization when that delivery path is implemented
+- calling `frilday-core`
 
-It should not own core business rules.
+It is not part of the desktop v0.1 runtime and should not own domain rules.
 
-### crates/frilday-core
+### `crates/frilday-core`
 
-Responsible for:
+Responsible for reusable rules such as:
 
-- Task domain logic
-- Schedule rules
-- Completion rules
-- Statistics calculation
-- Core services
-- Repository traits
+- task and time-planning logic
+- schedule rules
+- timer and time-entry rules
+- completion rules
+- planned-versus-actual statistics
+- core services and repository traits
 
-It must not depend on:
+It must not depend on React, Tauri, Axum, SQLite, PostgreSQL, or HTTP.
 
-- React
-- Tauri
-- Axum
-- SQLite
-- PostgreSQL
-- HTTP
-
-## Dependency Direction
+## Dependency direction
 
 ```text
 apps/desktop ─┐
@@ -109,47 +111,43 @@ apps/desktop ─┐
 apps/server  ─┘
 ```
 
-`frilday-core` must not know whether it is used by Desktop, Server, Mobile, or Web.
+`frilday-core` must not know whether it is used by Desktop, Server, Mobile, or
+Web.
 
-## Initial Development Plan
+## Development direction
 
-1. Move the current Tauri app into `apps/desktop`
-2. Create `apps/server`
-3. Create `crates/frilday-core`
-4. Move domain logic into `frilday-core`
-5. Add basic Axum routes:
-   - `GET /health`
-   - `GET /tasks`
-   - `POST /tasks`
+1. Keep the desktop-first experience buildable and useful.
+2. Extract reusable domain rules into `crates/frilday-core`.
+3. Keep Tauri, SQLite, and any future HTTP implementation behind adapters.
+4. Add Axum routes only when the separate server delivery path has a concrete
+   release or integration need.
+5. Add remote persistence and synchronization after the local-first desktop
+   loop is stable.
 
-6. Make the desktop app call the local Axum server
-7. Use SQLite for the first desktop release
-8. Later replace or extend storage with PostgreSQL for cloud-first usage
-
-## Design Principle
-
-FrilDay should be built around one core idea:
+## Design principles
 
 ```text
-UI and transport layers may change.
-Core rules should remain stable.
+Plan executable time.
+Execute with a timer.
+Track actual investment.
+Review planned versus actual time.
+Adjust the next plan.
 ```
 
-This allows the project to grow from a desktop app into a cloud-first multi-platform product without rewriting the business logic.
+UI and transport layers may change; core rules should remain stable. Avoid
+turning FrilDay into a generic Todo, habit, Pomodoro, calendar, or dashboard
+application.
 
-## Git Workflow
+## Git workflow
 
-The repository is moving from a single desktop app into a monorepo. Changes should be grouped by layer so the move stays reviewable.
+Changes should be grouped by layer so the monorepo remains reviewable.
 
-### Branch Strategy
+### Branch strategy
 
-- `main` stays deployable and buildable
-- short-lived feature branches start from `main`
-- prefer small PRs that touch one concern:
-  - desktop UI
-  - server API
-  - shared core
-  - docs / tooling
+- `main` stays deployable and buildable.
+- Short-lived feature branches start from `main`.
+- Prefer small PRs that touch one concern: desktop UI, server adapter, shared
+  core, or docs/tooling.
 
 Suggested branch names:
 
@@ -159,14 +157,10 @@ Suggested branch names:
 - `docs/architecture-readme`
 - `chore/gitignore-workspace`
 
-### Commit Scope
+### Commit scope
 
-Keep commits intentional and easy to revert.
-
-- move files without behavior changes in one commit
-- change imports / wiring in a separate commit
-- change behavior in another commit
-- update docs when architecture or workflow changes
+Keep commits intentional and easy to revert. Separate file moves, wiring,
+behavior changes, and documentation updates when practical.
 
 Suggested commit prefixes:
 
@@ -176,21 +170,10 @@ Suggested commit prefixes:
 - `docs:`
 - `chore:`
 
-### Integration Order
-
-When a feature spans multiple layers, merge in this order when possible:
-
-1. `crates/frilday-core`
-2. `apps/server`
-3. `apps/desktop`
-4. docs and cleanup
-
-This keeps dependency flow aligned with the intended architecture.
-
-### Pull Request Checklist
+### Pull request checklist
 
 - desktop build still passes
 - server compiles if touched
-- core crate tests pass if touched
+- core tests pass if touched
 - docs reflect structural changes
 - no generated build outputs are committed unless intentional

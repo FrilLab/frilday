@@ -4,7 +4,7 @@ import './styles/index.css';
 import App from './app/App.tsx';
 import { LocaleProvider } from './i18n/provider.tsx';
 import { initializePlatform } from './infrastructure/platform';
-import { useDailyCheckStore } from './app/store/useDailyCheckStore';
+import { useFrilDayStore } from './app/store/useFrilDayStore';
 
 type BootState = { ready: boolean };
 
@@ -49,11 +49,11 @@ function BootstrapApp() {
     void (async () => {
       const platformError = await initializePlatform();
       if (platformError) {
-        useDailyCheckStore.setState({ errorMsg: platformError });
+        useFrilDayStore.setState({ errorMsg: platformError });
       }
 
       try {
-        await useDailyCheckStore.getState().hydrate();
+        await useFrilDayStore.getState().hydrate();
       } catch (error) {
         const detail =
           error instanceof Error
@@ -62,7 +62,7 @@ function BootstrapApp() {
               ? error
               : 'Unknown initialization error';
         console.error('App bootstrap failed', error);
-        useDailyCheckStore.setState({
+        useFrilDayStore.setState({
           hydrated: true,
           errorMsg: `App bootstrap failed. ${detail}`,
         });

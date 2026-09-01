@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "dailycheck",
+      "name": "frilday-desktop",
       "dependencies": {
         "@hookform/resolvers": "^5.2.2",
         "@tailwindcss/vite": "^4.2.1",

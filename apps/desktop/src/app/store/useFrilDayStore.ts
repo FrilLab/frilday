@@ -20,11 +20,11 @@ import { upsertDailyMemo } from '../../domain/memo';
 export type Filter = 'all' | Category;
 
 type PersistedCollections = Pick<
-  DailyCheckState,
+  FrilDayState,
   'tasks' | 'completions' | 'timeEntries' | 'taskDailyMemos'
 >;
 
-interface DailyCheckState {
+interface FrilDayState {
   hydrated: boolean;
   tasks: Task[];
   completions: Completion[];
@@ -91,13 +91,13 @@ function persistCollections(
 ): void {
   void replaceAllAppData(next).catch((error) => {
     console.error(failureMessage, error);
-    useDailyCheckStore.setState({
+    useFrilDayStore.setState({
       errorMsg: `${failureMessage} ${formatError(error)}`,
     });
   });
 }
 
-export const useDailyCheckStore = create<DailyCheckState>((set, get) => ({
+export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   hydrated: false,
   tasks: [],
   completions: [],
