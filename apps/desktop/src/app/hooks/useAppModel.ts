@@ -8,7 +8,7 @@ import type { Tab } from '../layout/HeaderTabs';
 import type { CreateTaskInput } from '../../features/task/components/TaskForm';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
-import { isVisibleInWeek } from '../../domain/scheduleLimit';
+import { isVisibleInWeek } from '../../domain/schedule/scheduleLimit';
 
 export function useAppModel() {
   const {

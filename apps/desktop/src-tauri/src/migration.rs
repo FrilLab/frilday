@@ -43,7 +43,7 @@ pub fn migrate_legacy_app_config_dir(app: &tauri::AppHandle) -> tauri::Result<()
   fs::create_dir_all(&current_config_dir)?;
   fs::copy(legacy_db_path, current_db_path)?;
 
-  Ok(())
+    Ok(())
 }
 
 #[cfg(test)]

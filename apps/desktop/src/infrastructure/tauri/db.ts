@@ -6,9 +6,11 @@ export type AppDb = {
   select<T>(sql: string, bind?: unknown[]): Promise<T[]>;
 };
 
+// Keep the existing database filename; changing it would bypass the native migration.
 const DB_URL = 'sqlite:daily_check.db';
 
 let dbPromise: Promise<import('@tauri-apps/plugin-sql').default> | null = null;
+let initPromise: Promise<void> | null = null;
 
 async function getDatabase(): Promise<import('@tauri-apps/plugin-sql').default> {
   if (!isTauri()) {
@@ -24,9 +26,7 @@ async function getDatabase(): Promise<import('@tauri-apps/plugin-sql').default> 
   return dbPromise;
 }
 
-async function init(): Promise<void> {
-  if (!isTauri()) return;
-
+async function initializeSchema(): Promise<void> {
   const db = await getDatabase();
   await db.execute(
     `
@@ -100,6 +100,19 @@ async function init(): Promise<void> {
     `,
     [],
   );
+}
+
+async function init(): Promise<void> {
+  if (!isTauri()) return;
+
+  if (!initPromise) {
+    initPromise = initializeSchema().catch((error) => {
+      initPromise = null;
+      throw error;
+    });
+  }
+
+  await initPromise;
 }
 
 async function execute(sql: string, bind: unknown[] = []): Promise<void> {

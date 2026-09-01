@@ -8,7 +8,7 @@ import type {
   TimeEntry,
 } from '../../shared/types';
 import type { TodayStats } from '../../domain/stats/stats';
-import { diffMinutes } from '../../shared/utils/date';
+import { getTrackedMinutes } from '../../domain/timeTracking';
 import { LocaleContext } from '../../i18n/context';
 
 // (role: clamp helper, type: (number, number, number)=>number)
@@ -95,20 +95,13 @@ export function TodayPage(props: {
 
   const todayTaskIdSet = new Set(todayTasks.map((t) => t.id));
 
-  const doneTaskIdSet = new Set(
-    (completions ?? [])
-      .filter((c) => c.date === todayYmd && todayTaskIdSet.has(c.taskId))
-      .map((c) => c.taskId),
-  );
-
   const measuredByTaskId = new Map<string, number>();
 
   (timeEntries ?? []).forEach((e) => {
     if (e.date !== todayYmd) return;
     if (!todayTaskIdSet.has(e.taskId)) return;
 
-    const minutes =
-      e.endedAt == null ? diffMinutes(e.startedAt, nowIso) : e.minutes || 0;
+    const minutes = getTrackedMinutes(e, nowIso);
 
     measuredByTaskId.set(
       e.taskId,
@@ -116,11 +109,10 @@ export function TodayPage(props: {
     );
   });
 
-  const spentMinutesToday = todayTasks.reduce((acc, t) => {
-    const planned = Math.max(0, t.durationMinutes || 0);
-    if (doneTaskIdSet.has(t.id)) return acc + planned;
-    return acc + (measuredByTaskId.get(t.id) || 0);
-  }, 0);
+  const spentMinutesToday = todayTasks.reduce(
+    (acc, t) => acc + (measuredByTaskId.get(t.id) || 0),
+    0,
+  );
 
   const timeProgressPct =
     plannedMinutesToday <= 0

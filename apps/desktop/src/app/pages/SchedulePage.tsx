@@ -1,7 +1,7 @@
 import { useContext, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { Completion, Task } from '../../shared/types';
-import { buildWeekSchedule, WEEK_ORDER } from '../../domain/scheduleView';
+import { buildWeekSchedule, WEEK_ORDER } from '../../domain/schedule/scheduleView';
 import {
   buildWeekDates,
   startOfWeekMonday,
@@ -238,17 +238,6 @@ export function SchedulePage(props: {
                           </div>
                         </div>
 
-                        {blocks >= 2 && (
-                          <div
-                            className={clsx(
-                              'mt-2 hidden text-xs lg:block',
-                              doneThatDay
-                                ? 'text-emerald-200/60'
-                                : 'text-zinc-600',
-                            )}>
-                            {/* room for future */}
-                          </div>
-                        )}
                       </button>
                     );
                   })}

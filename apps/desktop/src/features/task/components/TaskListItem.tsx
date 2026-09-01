@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import type { Completion, DayOfWeek, Task, TimeEntry } from '../types';
 import { isDoneOn } from '../../../domain/completion';
 import { isScheduledOn } from '../../../domain/schedule';
-import { diffMinutes } from '../date';
+import { totalTrackedMinutes } from '../../../domain/timeTracking';
 import { Archive, Check, Pause, Pencil, Play, StickyNote } from 'lucide-react';
 import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
@@ -79,24 +79,23 @@ export function TaskListItem(props: TaskListItemProps) {
       : `(${Math.min(doneCountTotal, task.autoArchiveAfter)}/${task.autoArchiveAfter})`;
 
   const safeTimeEntries = timeEntries ?? [];
-  const todayEntries = safeTimeEntries.filter(
-    (e) => e.taskId === task.id && e.date === todayYmd,
-  );
 
-  // Store policy: only ONE running entry per day.
+  // Store policy: only ONE running entry is active at a time.
   const running = runningTaskIdToday === task.id;
 
-  const totalMinutesToday = todayEntries.reduce((acc, e) => {
-    if (e.endedAt == null) return acc + diffMinutes(e.startedAt, nowIso);
-    return acc + (e.minutes || 0);
-  }, 0);
+  const totalMinutesToday = totalTrackedMinutes(
+    safeTimeEntries,
+    task.id,
+    todayYmd,
+    nowIso,
+  );
 
   const plannedMinutes = Math.max(0, task.durationMinutes || 0);
 
-  // progress (0~1). if done => 1 (UX)
-  const progress01 = doneToday
-    ? 1
-    : plannedMinutes === 0
+  // Completion and tracked time are independent. A manual completion must not
+  // make the actual-time progress look like the planned time was spent.
+  const progress01 =
+    plannedMinutes === 0
       ? 0
       : Math.min(totalMinutesToday / plannedMinutes, 1);
 
@@ -233,7 +232,7 @@ export function TaskListItem(props: TaskListItemProps) {
             <span
               className={clsx(variant == 'today' ? 'inline-block' : 'hidden')}>
               · {tr('task.todaySpent')}:{' '}
-              {doneToday ? task.durationMinutes : totalMinutesToday}
+              {totalMinutesToday}
               {tr('time.minuteShort')}
             </span>
             {task.autoArchiveAfter != null && (

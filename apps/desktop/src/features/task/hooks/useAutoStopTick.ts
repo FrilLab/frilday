@@ -17,7 +17,7 @@ export function useAutoStopTick() {
     const id = window.setInterval(() => {
       const finishedTaskTitles = useFrilDayStore
         .getState()
-        .autoStopIfReached({ today: new Date() });
+        .autoStopIfReached();
 
       if (finishedTaskTitles.length === 0) return;
 

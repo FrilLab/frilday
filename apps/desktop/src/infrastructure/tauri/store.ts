@@ -58,13 +58,19 @@ async function writeSqlSetting(key: string, value: unknown): Promise<void> {
   );
 }
 
-function readLegacyStorageSetting<T>(key: string): T | null {
+type LegacySetting = {
+  value: unknown;
+  present: boolean;
+  valid: boolean;
+};
+
+function readLegacyStorageSetting(key: string): LegacySetting {
   try {
     const raw = localStorage.getItem(key);
-    if (raw == null) return null;
-    return JSON.parse(raw) as T;
+    if (raw == null) return { value: null, present: false, valid: true };
+    return { value: JSON.parse(raw) as unknown, present: true, valid: true };
   } catch {
-    return null;
+    return { value: null, present: true, valid: false };
   }
 }
 
@@ -79,6 +85,7 @@ async function migrateLegacySettingsIfNeeded(): Promise<void> {
   }
 
   let legacyStoreValues = new Map<string, unknown>();
+  let hasInvalidLegacyValue = false;
 
   try {
     const { load } = await import('@tauri-apps/plugin-store');
@@ -95,20 +102,29 @@ async function migrateLegacySettingsIfNeeded(): Promise<void> {
   }
 
   for (const key of LEGACY_SETTING_KEYS) {
+    const legacyLocalValue = readLegacyStorageSetting(key);
+    if (!legacyLocalValue.valid) {
+      hasInvalidLegacyValue = true;
+      continue;
+    }
+
     const existing = await readSqlSetting(key);
-    if (existing != null) continue;
 
     const legacyValue =
-      legacyStoreValues.get(key) ?? readLegacyStorageSetting<unknown>(key);
+      legacyStoreValues.get(key) ?? legacyLocalValue.value;
 
-    if (legacyValue != null) {
+    if (existing == null && legacyValue != null) {
       await writeSqlSetting(key, legacyValue);
     }
 
-    localStorage.removeItem(key);
+    if (legacyLocalValue.present) {
+      localStorage.removeItem(key);
+    }
   }
 
-  await setMeta(LEGACY_SETTINGS_MIGRATION_KEY, '1');
+  if (!hasInvalidLegacyValue) {
+    await setMeta(LEGACY_SETTINGS_MIGRATION_KEY, '1');
+  }
 }
 
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {

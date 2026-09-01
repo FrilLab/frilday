@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import type { Category, DayOfWeek } from '../types';
 import { ALL_DAYS } from '../../../domain/schedule';
 import { LocaleContext } from '../../../i18n/context';
-import { toYmd } from '../date';
+import { toYmd } from '../../../shared/utils/date';
 
 // (role: zod enum sources, type: readonly arrays)
 const CATEGORY_VALUES = [
