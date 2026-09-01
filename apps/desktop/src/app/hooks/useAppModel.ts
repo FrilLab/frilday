@@ -1,15 +1,48 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useFrilDayStore } from '../store/useFrilDayStore';
 import { dayOfWeek, startOfWeekMonday, toYmd } from '../../shared/utils/date';
-import { calcTodayStats, calcWeekStats } from '../../domain/stats/stats';
-import { isDoneOn } from '../../domain/completion';
-import type { Task } from '../../shared/types';
+import type { Task, TaskDayState } from '../../shared/types';
 import type { Tab } from '../layout/HeaderTabs';
 import type { CreateTaskInput } from '../../features/task/components/TaskForm';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
-import { isVisibleInWeek } from '../../domain/schedule/scheduleLimit';
-import { getRunningTaskId } from '../../domain/timeTracking/timer';
+import {
+  getCoreStatistics,
+  getCoreTimeTotals,
+  getRunningTaskIdWithCore,
+  getVisibleScheduleSlots,
+  type CoreStatistics,
+  type CoreTimeTotals,
+} from '../../infrastructure/tauri/core';
+
+const EMPTY_STATS: CoreStatistics = {
+  week: {
+    weekStart: '',
+    totalRate: 0,
+    weekdayRate: 0,
+    weekendRate: 0,
+    dailyRate: 0,
+    customRate: 0,
+  },
+  weekRange: { scheduledCount: 0, completedCount: 0, rate: 0 },
+  today: { scheduledCount: 0, completedCount: 0, rate: 0 },
+  month: { scheduledCount: 0, completedCount: 0, rate: 0 },
+  allTime: { scheduledCount: 0, completedCount: 0, rate: 0 },
+  todayYmd: '',
+  monthStartYmd: '',
+  allStartYmd: '',
+  weekEndYmd: '',
+};
+
+const EMPTY_TIME_TOTALS: CoreTimeTotals = {
+  plannedMinutes: 0,
+  actualMinutes: 0,
+  byTask: [],
+};
+
+function monthStartYmd(ymd: string): string {
+  return `${ymd.slice(0, 7)}-01`;
+}
 
 export function useAppModel() {
   const {
@@ -61,51 +94,148 @@ export function useAppModel() {
   const todayDow = dayOfWeek(today);
   const weekStartYmd = toYmd(startOfWeekMonday(today));
 
-  // Single running timer. Keep entries started before midnight controllable.
-  // (role: single running task id, type: string | null)
-  const runningTaskId = useMemo(() => {
-    return getRunningTaskId(timeEntries);
-  }, [timeEntries]);
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [scheduleSlots, setScheduleSlots] = useState<
+    Awaited<ReturnType<typeof getVisibleScheduleSlots>>
+  >([]);
+  const [statistics, setStatistics] = useState<CoreStatistics>(EMPTY_STATS);
+  const [timeTotals, setTimeTotals] =
+    useState<CoreTimeTotals>(EMPTY_TIME_TOTALS);
 
-  const weekStats = useMemo(
-    () => calcWeekStats(tasks, completions, weekStartYmd),
-    [tasks, completions, weekStartYmd],
-  );
+  useEffect(() => {
+    if (!hydrated) return;
+    let current = true;
+    void getVisibleScheduleSlots({
+      tasks,
+      completions,
+      weekStartYmd,
+      includeArchived: true,
+    })
+      .then((slots) => {
+        if (current) setScheduleSlots(slots);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to calculate schedule with frilday-core', error);
+        if (current) setScheduleSlots([]);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [hydrated, tasks, completions, weekStartYmd]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let current = true;
+    void getRunningTaskIdWithCore(timeEntries)
+      .then((taskId) => {
+        if (current) setRunningTaskId(taskId);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to read running session from frilday-core', error);
+        if (current) setRunningTaskId(null);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [hydrated, timeEntries]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let current = true;
+    void getCoreStatistics({
+      tasks,
+      completions,
+      weekStartYmd,
+      todayYmd,
+      monthStartYmd: monthStartYmd(todayYmd),
+    })
+      .then((result) => {
+        if (current) setStatistics(result);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to calculate statistics with frilday-core', error);
+        if (current) setStatistics(EMPTY_STATS);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [hydrated, tasks, completions, weekStartYmd, todayYmd]);
+
+  const visibleToday = useMemo(() => {
+    const state = new Map<
+      string,
+      { visible: boolean; scheduled: boolean; completed: boolean; completionCount: number }
+    >();
+    for (const slot of scheduleSlots) {
+      state.set(slot.taskId, {
+        visible: slot.dates.includes(todayYmd),
+        scheduled: slot.scheduledDates.includes(todayYmd),
+        completed: slot.completedDates.includes(todayYmd),
+        completionCount: slot.completionCount,
+      });
+    }
+    return state;
+  }, [scheduleSlots, todayYmd]);
 
   const todayTasks = useMemo(() => {
     const filtered = tasks.filter((t) => {
       if (!t.isActive) return false;
 
       const isRunning = runningTaskId === t.id;
-      const createdAtYmd = t.createdAt.slice(0, 10);
-      const startYmd = t.startYmd?.trim() || null;
-      const effectiveStartYmd =
-        startYmd && startYmd > createdAtYmd ? startYmd : createdAtYmd;
       // Keep an active timer visible after midnight so it can still be stopped.
       if (isRunning) return true;
-      if (todayYmd < effectiveStartYmd) return false;
-
-      const doneToday = completions.some(
-        (c) => c.taskId === t.id && c.date === todayYmd,
-      );
-      // When done exists on this day, keep the row visible even if backlog is exhausted.
-      if (doneToday) return true;
-
-      if (!t.daysOfWeek.includes(todayDow)) return false;
-      return isVisibleInWeek(t, todayYmd, weekStartYmd, completions);
+      return visibleToday.get(t.id)?.visible ?? false;
     });
     return [...filtered].sort((a, b) => {
-      const aDone = isDoneOn(completions, a.id, todayYmd);
-      const bDone = isDoneOn(completions, b.id, todayYmd);
+      const aDone = visibleToday.get(a.id)?.completed ?? false;
+      const bDone = visibleToday.get(b.id)?.completed ?? false;
       if (aDone === bDone) return 0;
       return aDone ? 1 : -1;
     });
-  }, [tasks, completions, runningTaskId, todayDow, todayYmd, weekStartYmd]);
+  }, [tasks, runningTaskId, visibleToday]);
 
-  const todayStats = useMemo(
-    () => calcTodayStats(todayTasks, completions, todayYmd, todayDow),
-    [todayTasks, completions, todayYmd, todayDow],
-  );
+  useEffect(() => {
+    if (!hydrated) return;
+    let current = true;
+    void getCoreTimeTotals({
+      tasks,
+      timeEntries,
+      dateYmd: todayYmd,
+      nowIso,
+      taskIds: todayTasks.map((task) => task.id),
+    })
+      .then((result) => {
+        if (current) setTimeTotals(result);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to calculate time totals with frilday-core', error);
+        if (current) setTimeTotals(EMPTY_TIME_TOTALS);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [hydrated, tasks, timeEntries, todayYmd, nowIso, todayTasks]);
+
+  const taskDayStates = useMemo(() => {
+    const actualMinutes = new Map(
+      timeTotals.byTask.map((entry) => [entry.taskId, entry.actualMinutes]),
+    );
+    const states = new Map<string, TaskDayState>();
+    for (const task of tasks) {
+      const visible = visibleToday.get(task.id);
+      states.set(task.id, {
+        scheduled: visible?.scheduled ?? false,
+        completed: visible?.completed ?? false,
+        completionCount: visible?.completionCount ?? 0,
+        actualMinutes: actualMinutes.get(task.id) ?? 0,
+      });
+    }
+    return states;
+  }, [tasks, timeTotals, visibleToday]);
 
   const manageTasks = useMemo(() => {
     const base = showArchived
@@ -238,8 +368,11 @@ export function useAppModel() {
     setManageCategory,
 
     // derived
-    weekStats,
-    todayStats,
+    weekStats: statistics.week,
+    todayStats: statistics.today,
+    periodStats: statistics,
+    todayTimeTotals: timeTotals,
+    taskDayStates,
     todayTasks,
     manageTasks,
 

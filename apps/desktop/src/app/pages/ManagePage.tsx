@@ -5,6 +5,7 @@ import type {
   Completion,
   DayOfWeek,
   Task,
+  TaskDayState,
   TimeEntry,
 } from '../../shared/types';
 import { LocaleContext } from '../../i18n/context';
@@ -46,6 +47,7 @@ export function ManagePage(props: {
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
+  taskDayStates: ReadonlyMap<string, TaskDayState>;
 }) {
   const { t } = useContext(LocaleContext);
 
@@ -73,6 +75,7 @@ export function ManagePage(props: {
     onStartTimer,
     onStopTimer,
     onError,
+    taskDayStates,
   } = props;
 
   return (
@@ -204,6 +207,7 @@ export function ManagePage(props: {
             onStartTimer={onStartTimer}
             onStopTimer={onStopTimer}
             onError={onError}
+            taskDayStates={taskDayStates}
           />
 
           {tasks.length === 0 && (

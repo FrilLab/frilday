@@ -59,8 +59,9 @@ cargo test --workspace
 - `apps/desktop` is the active application surface.
 - `apps/server` is a thin future delivery adapter and is not required by the
   desktop runtime.
-- The current desktop scaffold still owns the React-facing domain and SQLite
-  integration while reusable rules are extracted into `frilday-core`.
+- The desktop React layer uses the Tauri adapter for schedule, completion,
+  session, timer, and statistics calculations backed by `frilday-core`;
+  SQLite persistence remains local adapter code.
 
 ## Desktop app
 

@@ -225,12 +225,13 @@ TimeEntry
 도메인 로직과 UI를 분리하는 구조로 설계되어 있습니다.
 
 ```
-domain/
- ├─ types
- ├─ completion
- ├─ schedule
- ├─ stats
- └─ date
+src/domain/
+ ├─ task
+ ├─ memo
+ └─ schedule (표시용 메타데이터)
+
+crates/frilday-core/
+ └─ 일정, 완료, 세션, 타이머, 통계 규칙
 
 ui/
  ├─ components
@@ -273,7 +274,9 @@ UI
 
 ### 2. UI와 로직 분리
 
-도메인 로직은 `domain` 폴더에서 관리됩니다.
+재사용 가능한 도메인 규칙은 `crates/frilday-core`에서 관리됩니다. 데스크톱
+React 코드는 Tauri 어댑터를 통해 이 규칙을 호출하고, `domain` 폴더에는
+화면과 저장 형식에 필요한 얇은 보조 로직만 둡니다.
 
 ---
 
@@ -281,12 +284,12 @@ UI
 
 모든 계산은 **순수 함수 기반으로 처리**됩니다.
 
-예시
+예시는 다음과 같습니다.
 
 ```
-isScheduledOn()
-isDoneOn()
-diffMinutes()
+core_visible_schedule
+core_toggle_completion
+core_start_timer / core_stop_timer
 ```
 
 ---

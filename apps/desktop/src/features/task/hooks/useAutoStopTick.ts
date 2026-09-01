@@ -15,13 +15,13 @@ export function useAutoStopTick() {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const finishedTaskTitles = useFrilDayStore
-        .getState()
-        .autoStopIfReached();
-
-      if (finishedTaskTitles.length === 0) return;
-
       void (async () => {
+        const finishedTaskTitles = await useFrilDayStore
+          .getState()
+          .autoStopIfReached();
+
+        if (finishedTaskTitles.length === 0) return;
+
         const notifyEnabled = await platformSettings.get<boolean>(
           TIMER_DONE_NOTIFY_KEY,
           true,

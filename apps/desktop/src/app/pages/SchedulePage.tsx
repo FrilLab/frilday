@@ -1,7 +1,11 @@
-import { useContext, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import type { Completion, Task } from '../../shared/types';
-import { buildWeekSchedule, WEEK_ORDER } from '../../domain/schedule/scheduleView';
+import { WEEK_ORDER } from '../../domain/schedule/scheduleView';
+import {
+  getVisibleScheduleSlots,
+  type CoreScheduleSlot,
+} from '../../infrastructure/tauri/core';
 import {
   buildWeekDates,
   startOfWeekMonday,
@@ -64,16 +68,79 @@ export function SchedulePage(props: {
   );
   const canGoNext = normalizedWeekStartYmd < currentWeekStartYmd;
 
-  const week = buildWeekSchedule(tasks, completions, normalizedWeekStartYmd, {
-    includeArchived: false,
-    getMemoText,
-  });
+  const [scheduleSlots, setScheduleSlots] = useState<CoreScheduleSlot[]>([]);
+
+  useEffect(() => {
+    let current = true;
+    void getVisibleScheduleSlots({
+      tasks,
+      completions,
+      weekStartYmd: normalizedWeekStartYmd,
+    })
+      .then((slots) => {
+        if (current) setScheduleSlots(slots);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to calculate schedule with frilday-core', error);
+        if (current) setScheduleSlots([]);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [tasks, completions, normalizedWeekStartYmd]);
 
   const weekDates = useMemo(
     () => buildWeekDates(normalizedWeekStartYmd),
     [normalizedWeekStartYmd],
   );
   const weekEndYmd = weekDates[6] ?? normalizedWeekStartYmd;
+
+  const week = useMemo(() => {
+    const slotsByTask = new Map(
+      scheduleSlots.map((slot) => [slot.taskId, slot.dates]),
+    );
+    return WEEK_ORDER.reduce<Record<(typeof WEEK_ORDER)[number], Array<{
+      taskId: string;
+      title: string;
+      description?: string;
+      memoText?: string;
+      durationMinutes: number;
+      category: Task['category'];
+      isActive: boolean;
+    }>>>(
+      (result, dow, index) => {
+        const dateYmd = weekDates[index] ?? normalizedWeekStartYmd;
+        result[dow] = tasks
+          .filter((task) => slotsByTask.get(task.id)?.includes(dateYmd))
+          .map((task) => ({
+            taskId: task.id,
+            title: task.title,
+            description: task.description,
+            memoText: getMemoText?.(task.id, dateYmd) ?? undefined,
+            durationMinutes: task.durationMinutes,
+            category: task.category,
+            isActive: task.isActive,
+          }))
+          .sort((a, b) => {
+            if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+            if (a.category !== b.category)
+              return a.category.localeCompare(b.category);
+            return a.title.localeCompare(b.title);
+          });
+        return result;
+      },
+      {
+        Mon: [],
+        Tue: [],
+        Wed: [],
+        Thu: [],
+        Fri: [],
+        Sat: [],
+        Sun: [],
+      },
+    );
+  }, [scheduleSlots, tasks, weekDates, normalizedWeekStartYmd, getMemoText]);
 
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">

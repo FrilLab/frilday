@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import type { WeekStats } from '../../../domain/stats/stats';
+import type { CoreWeeklyStats as WeekStats } from '../../../infrastructure/tauri/core';
 import { LocaleContext } from '../../../i18n/context';
 
 interface StatsPanelProps {

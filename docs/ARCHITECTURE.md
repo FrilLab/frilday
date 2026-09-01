@@ -44,9 +44,11 @@ complete, the desktop application will use Tauri for native capabilities,
 `frilday-core` for reusable domain rules, and the SQLite adapter for local
 persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
 
-The current scaffold is still mid-extraction: active domain and SQLite
-integration remain under `apps/desktop`, while `crates/frilday-core` is not
-yet wired into the desktop crate.
+The desktop Tauri adapter now translates the persisted `Task`, `Completion`,
+and `TimeEntry` shapes into core inputs for schedule visibility, completion
+transitions, session transitions, timer auto-stop, and statistics. SQLite
+storage remains an adapter concern; the React layer does not duplicate those
+rules.
 
 The stable Routine/Plan/Session/Completion vocabulary and the compatibility
 mapping for the current desktop records are defined in
@@ -78,6 +80,7 @@ Responsible for:
 - Tauri integration and native capabilities
 - desktop packaging
 - adapting local persistence to the application
+- translating legacy persisted records to and from `frilday-core` commands
 
 The desktop layer should prioritize the active timer and today's executable
 plan. It should not become a second home for reusable core business rules.

@@ -8,18 +8,16 @@ import type {
   TimeEntry,
 } from '../../shared/types';
 import { loadAppData, replaceAllAppData } from '../../infrastructure/storage';
-import { diffMinutes, toYmd } from '../../shared/utils/date';
-import {
-  shouldAutoArchive,
-  toggleCompletion as toggleCompletionDomain,
-} from '../../domain/completion';
+import { toYmd } from '../../shared/utils/date';
 import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import {
-  autoStopEntriesAtTarget,
-  closeRunningEntries,
-} from '../../domain/timeTracking/timer';
+  autoStopWithCore,
+  startTimerWithCore,
+  stopTimerWithCore,
+  toggleCompletionWithCore,
+} from '../../infrastructure/tauri/core';
 
 export type Filter = 'all' | Category;
 
@@ -62,11 +60,11 @@ interface FrilDayState {
   archiveTask: (taskId: string) => void;
   restoreTask: (taskId: string) => void;
   deleteTask: (taskId: string) => void;
-  toggleToday: (input: { taskId: string; today: Date }) => void;
+  toggleToday: (input: { taskId: string; today: Date }) => Promise<void>;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
-  startTimer: (input: { taskId: string; today: Date }) => void;
-  stopTimer: (input: { taskId: string; today: Date }) => void;
-  autoStopIfReached: () => string[];
+  startTimer: (input: { taskId: string; today: Date }) => Promise<void>;
+  stopTimer: (input: { taskId: string; today: Date }) => Promise<void>;
+  autoStopIfReached: () => Promise<string[]>;
 }
 
 function uid(): string {
@@ -304,55 +302,43 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     persistCollections(next, 'Failed to delete task.');
   },
 
-  toggleToday: ({ taskId, today }) => {
+  toggleToday: async ({ taskId, today }) => {
     const date = toYmd(today);
 
-    const prevCompletions = get().completions;
-    const nextCompletions = toggleCompletionDomain(
-      prevCompletions,
-      taskId,
-      date,
-    );
+    try {
+      const result = await toggleCompletionWithCore({
+        tasks: get().tasks,
+        completions: get().completions,
+        taskId,
+        date,
+      });
+      const toggledTask = get().tasks.find((task) => task.id === taskId);
+      const nextTasks =
+        result.autoArchived && toggledTask
+          ? get().tasks.map((task) =>
+              task.id === taskId ? { ...task, isActive: false } : task,
+            )
+          : get().tasks;
 
-    const wasDone = prevCompletions.some(
-      (c) => c.taskId === taskId && c.date === date,
-    );
-
-    let nextTasks = get().tasks;
-
-    if (!wasDone) {
-      const toggledTask = nextTasks.find((t) => t.id === taskId);
-      if (
-        toggledTask &&
-        toggledTask.isActive &&
-        shouldAutoArchive(toggledTask, nextCompletions)
-      ) {
-        nextTasks = nextTasks.map((task) =>
-          task.id === taskId ? { ...task, isActive: false } : task,
-        );
-
-        const notifier = getNotifier();
-        notifier.notify({
+      if (result.autoArchived && toggledTask) {
+        getNotifier().notify({
           level: 'info',
           message: `Auto-archived: ${toggledTask.title}`,
         });
       }
+
+      const next = {
+        tasks: nextTasks,
+        completions: result.completions,
+        timeEntries: get().timeEntries,
+        taskDailyMemos: get().taskDailyMemos,
+      };
+
+      set({ ...next, errorMsg: '' });
+      persistCollections(next, 'Failed to update completion.');
+    } catch (error) {
+      set({ errorMsg: `Failed to update completion. ${formatError(error)}` });
     }
-
-    const next = {
-      tasks: nextTasks,
-      completions: nextCompletions,
-      timeEntries: get().timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
-
-    set({
-      tasks: nextTasks,
-      completions: nextCompletions,
-      timeEntries: get().timeEntries,
-      errorMsg: '',
-    });
-    persistCollections(next, 'Failed to update completion.');
   },
 
   setDailyMemo: ({ taskId, date, text }) => {
@@ -374,81 +360,73 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     persistCollections(next, 'Failed to save memo.');
   },
 
-  startTimer: ({ taskId, today }) => {
+  startTimer: async ({ taskId, today }) => {
     const date = toYmd(today);
     const nowIso = new Date().toISOString();
 
     const entries = get().timeEntries;
-    const alreadyRunningSameTask = entries.some(
-      (e) => e.taskId === taskId && e.endedAt == null,
-    );
-    if (alreadyRunningSameTask) {
-      set({ errorMsg: 'Timer is already running for this task today.' });
-      return;
+    try {
+      const nextTimeEntries = await startTimerWithCore({
+        timeEntries: entries,
+        sessionId: uid(),
+        taskId,
+        dateYmd: date,
+        startedAt: nowIso,
+      });
+      const next = {
+        tasks: get().tasks,
+        completions: get().completions,
+        timeEntries: nextTimeEntries,
+        taskDailyMemos: get().taskDailyMemos,
+      };
+
+      set({ timeEntries: nextTimeEntries, errorMsg: '' });
+      persistCollections(next, 'Failed to start timer.');
+    } catch (error) {
+      set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
     }
-
-    const nextTimeEntries = closeRunningEntries(entries, nowIso);
-
-    const entry: TimeEntry = {
-      id: uid(),
-      taskId,
-      date,
-      startedAt: nowIso,
-      endedAt: null,
-      minutes: 0,
-    };
-
-    const next = {
-      tasks: get().tasks,
-      completions: get().completions,
-      timeEntries: [entry, ...nextTimeEntries],
-      taskDailyMemos: get().taskDailyMemos,
-    };
-
-    set({ timeEntries: next.timeEntries, errorMsg: '' });
-    persistCollections(next, 'Failed to start timer.');
   },
 
-  stopTimer: ({ taskId, today }) => {
+  stopTimer: async ({ taskId, today }) => {
     const date = toYmd(today);
-
-    const idx = get().timeEntries.findIndex(
-      (e) => e.taskId === taskId && e.date <= date && e.endedAt == null,
-    );
-    if (idx === -1) {
-      set({ errorMsg: 'No running timer for this task today.' });
-      return;
-    }
-
     const nowIso = new Date().toISOString();
-    const cur = get().timeEntries[idx];
-    const minutes = diffMinutes(cur.startedAt, nowIso);
+    try {
+      const nextTimeEntries = await stopTimerWithCore({
+        timeEntries: get().timeEntries,
+        taskId,
+        dateYmd: date,
+        endedAt: nowIso,
+      });
+      const next = {
+        tasks: get().tasks,
+        completions: get().completions,
+        timeEntries: nextTimeEntries,
+        taskDailyMemos: get().taskDailyMemos,
+      };
 
-    const updated: TimeEntry = { ...cur, endedAt: nowIso, minutes };
-    const nextTimeEntries = [...get().timeEntries];
-    nextTimeEntries[idx] = updated;
-
-    const next = {
-      tasks: get().tasks,
-      completions: get().completions,
-      timeEntries: nextTimeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
-
-    set({ timeEntries: nextTimeEntries, errorMsg: '' });
-    persistCollections(next, 'Failed to stop timer.');
+      set({ timeEntries: nextTimeEntries, errorMsg: '' });
+      persistCollections(next, 'Failed to stop timer.');
+    } catch (error) {
+      set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
+    }
   },
 
-  autoStopIfReached: () => {
+  autoStopIfReached: async () => {
     if (!get().hydrated) return [];
 
     const nowIso = new Date().toISOString();
-    const result = autoStopEntriesAtTarget(
-      get().timeEntries,
-      get().tasks,
-      get().completions,
-      nowIso,
-    );
+    let result;
+    try {
+      result = await autoStopWithCore({
+        timeEntries: get().timeEntries,
+        tasks: get().tasks,
+        completions: get().completions,
+        nowIso,
+      });
+    } catch (error) {
+      set({ errorMsg: `Failed to auto-stop timer. ${formatError(error)}` });
+      return [];
+    }
 
     if (result.finishedTasks.length === 0) return [];
 

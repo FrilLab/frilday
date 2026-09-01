@@ -13,6 +13,7 @@ pub mod schedule;
 pub mod session;
 pub mod stats;
 pub mod time;
+pub mod timer;
 
 pub use completion::{
     Completion, completion_count_for_routine, is_completed_for_plan, is_completed_on,
@@ -23,14 +24,20 @@ pub use ids::{IdError, PlanId, RoutineId, SessionId};
 pub use plan::{Plan, PlanStatus};
 pub use routine::{Routine, RoutineError};
 pub use schedule::{
-    CustomSchedule, ScheduleError, ScheduleRule, effective_start_on, eligible_dates_between,
-    is_eligible_on, visible_dates_between,
+    CustomSchedule, ScheduleError, ScheduleRule, completed_dates_between, effective_start_on,
+    eligible_dates_between, is_eligible_on, visible_dates_between,
 };
 pub use session::{
-    Session, SessionError, SessionLedger, running_session, validate_no_concurrent_sessions,
+    Session, SessionError, SessionLedger, running_routine_id, running_session, start_session,
+    stop_session_for_routine, validate_no_concurrent_sessions,
 };
-pub use stats::{DailyTotals, TimeTotals, WeeklyTotals, aggregate_for_date, aggregate_for_week};
+pub use stats::{
+    CompletionTotals, DailyTotals, RoutineCategory, RoutineStatsTarget, TimeTotals,
+    WeeklyCompletionStats, WeeklyTotals, actual_minutes_for_routine, aggregate_for_date,
+    aggregate_for_week, completion_stats_between, completion_stats_for_week,
+};
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
+pub use timer::{AutoStopResult, FinishedSession, auto_stop_sessions_at_target};
 
 #[cfg(test)]
 mod tests {
@@ -80,6 +87,27 @@ mod tests {
                 &completions,
             ),
             vec![monday, monday.checked_add_days(1).unwrap()]
+        );
+    }
+
+    #[test]
+    fn schedule_start_after_week_beginning_excludes_earlier_weekdays() {
+        let mut routine = routine();
+        routine.set_starts_on(Some(LocalDate::parse("2026-01-08").unwrap()));
+        let week_start = LocalDate::parse("2026-01-05").unwrap();
+
+        assert_eq!(
+            visible_dates_between(
+                &routine,
+                week_start,
+                week_start.checked_add_days(6).unwrap(),
+                LocalDate::parse("2026-01-01").unwrap(),
+                &[],
+            ),
+            vec![
+                LocalDate::parse("2026-01-08").unwrap(),
+                LocalDate::parse("2026-01-09").unwrap()
+            ]
         );
     }
 
@@ -241,6 +269,108 @@ mod tests {
         assert_eq!(
             ledger.start(second),
             Err(SessionError::MultipleRunningSessions)
+        );
+        assert!(SessionLedger::default().active().is_none());
+        assert!(PlannedDuration::from_minutes(0).is_none());
+    }
+
+    #[test]
+    fn completed_history_survives_schedule_changes_and_archiving() {
+        let mut routine = routine();
+        let created = LocalDate::parse("2026-01-01").unwrap();
+        let saturday = LocalDate::parse("2026-01-10").unwrap();
+        let completions = vec![Completion::for_routine(routine.id().clone(), saturday)];
+
+        routine.archive();
+        assert_eq!(
+            visible_dates_between(&routine, saturday, saturday, created, &completions,),
+            vec![saturday]
+        );
+    }
+
+    #[test]
+    fn starting_a_timer_closes_the_other_running_session() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let first = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(RoutineId::new("routine-1").unwrap()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+        )
+        .unwrap();
+        let second = Session::start(
+            SessionId::new("session-2").unwrap(),
+            Some(RoutineId::new("routine-2").unwrap()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_060),
+        )
+        .unwrap();
+
+        let next = start_session(
+            &[first],
+            second,
+            Timestamp::from_unix_seconds(1_767_600_060),
+        )
+        .unwrap();
+        assert_eq!(
+            next.iter().filter(|session| session.is_running()).count(),
+            1
+        );
+        assert_eq!(
+            next[0].actual_duration_at(next[1].started_at()).minutes(),
+            1
+        );
+    }
+
+    #[test]
+    fn auto_stop_keeps_overtime_and_adds_a_completion_once() {
+        let mut routine = routine();
+        routine.set_occurrence_limit(Some(2)).unwrap();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+        )
+        .unwrap();
+        let result = auto_stop_sessions_at_target(
+            &[session],
+            &[routine.clone()],
+            &[],
+            Timestamp::from_unix_seconds(1_767_603_600),
+        )
+        .unwrap();
+
+        assert_eq!(result.finished()[0].minutes(), 60);
+        assert_eq!(result.completions().len(), 1);
+        assert_eq!(
+            result.sessions()[0].actual_duration().unwrap().minutes(),
+            60
+        );
+    }
+
+    #[test]
+    fn completion_statistics_keep_category_buckets_and_start_cutoffs() {
+        let routine = routine();
+        let created = LocalDate::parse("2026-01-01").unwrap();
+        let monday = LocalDate::parse("2026-01-05").unwrap();
+        let completions = vec![Completion::for_routine(routine.id().clone(), monday)];
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: created,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let weekly = completion_stats_for_week(&targets, &completions, monday);
+        assert_eq!(weekly.total().rate(), 100.0);
+        assert_eq!(weekly.weekday().completed_count(), 1);
+        assert_eq!(
+            completion_stats_between(&targets, &completions, monday, monday).rate(),
+            100.0
         );
     }
 }

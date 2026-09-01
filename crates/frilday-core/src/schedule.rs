@@ -166,6 +166,21 @@ pub fn visible_dates_between(
     merge_dates(period_dates, cutoff, queued, completed_in_period)
 }
 
+/// Return completion dates for a routine inside an inclusive period without
+/// requiring that the dates still match its current schedule. This is the
+/// historical part of the schedule projection.
+pub fn completed_dates_between(
+    routine: &Routine,
+    start: LocalDate,
+    end: LocalDate,
+    completions: &[Completion],
+) -> Vec<LocalDate> {
+    date_range(start, end)
+        .into_iter()
+        .filter(|date| is_completed_on(completions, routine, *date))
+        .collect()
+}
+
 fn merge_dates(
     period_dates: Vec<LocalDate>,
     cutoff: LocalDate,
