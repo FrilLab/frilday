@@ -5,10 +5,13 @@ import type {
   Task,
   Completion,
   DayOfWeek,
+  TaskDayState,
   TimeEntry,
 } from '../../shared/types';
-import type { TodayStats } from '../../domain/stats/stats';
-import { getTrackedMinutes } from '../../domain/timeTracking';
+import type {
+  CoreStatistics,
+  CoreTimeTotals,
+} from '../../infrastructure/tauri/core';
 import { LocaleContext } from '../../i18n/context';
 
 // (role: clamp helper, type: (number, number, number)=>number)
@@ -46,10 +49,12 @@ export function TodayPage(props: {
   todayYmd: string; // (role: YYYY-MM-DD, type: string)
   todayDow: DayOfWeek; // (role: day-of-week, type: DayOfWeek)
 
-  tasks: Task[]; // (role: all tasks, type: Task[])
   todayTasks: Task[]; // (role: tasks scheduled today, type: Task[])
 
-  todayStats: TodayStats; // (role: today stats, type: TodayStats)
+  todayStats: CoreStatistics['today']; // (role: core-derived today stats, type: CoreStatistics['today'])
+  periodStats: CoreStatistics;
+  todayTimeTotals: CoreTimeTotals;
+  taskDayStates: ReadonlyMap<string, TaskDayState>;
 
   completions: Completion[]; // (role: completions, type: Completion[])
   timeEntries: TimeEntry[]; // (role: time tracking logs, type: TimeEntry[])
@@ -71,9 +76,11 @@ export function TodayPage(props: {
   const {
     todayYmd,
     todayDow,
-    tasks,
     todayTasks,
     todayStats,
+    periodStats,
+    todayTimeTotals,
+    taskDayStates,
 
     completions,
     timeEntries,
@@ -88,35 +95,8 @@ export function TodayPage(props: {
     onError,
   } = props;
 
-  const scheduledTodayTasks = todayTasks.filter((task) =>
-    task.daysOfWeek.includes(todayDow),
-  );
-
-  const plannedMinutesToday = scheduledTodayTasks.reduce(
-    (acc, t) => acc + Math.max(0, t.durationMinutes || 0),
-    0,
-  );
-
-  const todayTaskIdSet = new Set(todayTasks.map((t) => t.id));
-
-  const measuredByTaskId = new Map<string, number>();
-
-  (timeEntries ?? []).forEach((e) => {
-    if (e.date !== todayYmd) return;
-    if (!todayTaskIdSet.has(e.taskId)) return;
-
-    const minutes = getTrackedMinutes(e, nowIso);
-
-    measuredByTaskId.set(
-      e.taskId,
-      (measuredByTaskId.get(e.taskId) || 0) + minutes,
-    );
-  });
-
-  const spentMinutesToday = todayTasks.reduce(
-    (acc, t) => acc + (measuredByTaskId.get(t.id) || 0),
-    0,
-  );
+  const plannedMinutesToday = todayTimeTotals.plannedMinutes;
+  const spentMinutesToday = todayTimeTotals.actualMinutes;
 
   const timeProgressPct =
     plannedMinutesToday <= 0
@@ -155,7 +135,7 @@ export function TodayPage(props: {
                 {t('stats.done')}
               </div>
               <div className="mt-2 text-2xl font-semibold text-zinc-100">
-                {todayStats.doneCount}
+                {todayStats.completedCount}
               </div>
             </div>
 
@@ -170,7 +150,7 @@ export function TodayPage(props: {
                     {todayStats.rate.toFixed(0)}%
                   </div>
                   <div className="text-xs text-zinc-500">
-                    ({todayStats.doneCount}/{todayStats.scheduledCount})
+                    ({todayStats.completedCount}/{todayStats.scheduledCount})
                   </div>
                 </div>
               </div>
@@ -182,9 +162,7 @@ export function TodayPage(props: {
 
         <section className="hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 xl:block">
           <PeriodStatsPanel
-            tasks={tasks}
-            completions={completions}
-            todayYmd={todayYmd}
+            stats={periodStats}
           />
         </section>
       </aside>
@@ -245,6 +223,7 @@ export function TodayPage(props: {
             onStartTimer={onStartTimer}
             onStopTimer={onStopTimer}
             onError={onError}
+            taskDayStates={taskDayStates}
           />
 
           {todayTasks.length === 0 && (

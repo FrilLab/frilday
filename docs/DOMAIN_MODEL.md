@@ -48,7 +48,9 @@ SQLite, PostgreSQL, and serialization libraries.
 - `repeatCount` is mapped to the core's `occurrence_limit`, a lifetime
   occurrence cap, because that is the behavior of the current desktop
   schedule-limit implementation. It is not treated as a weekly recurrence
-  count. `autoArchiveAfter` is mapped separately to `completion_limit`.
+  count. For legacy records without `repeatCount`, the adapter retains the
+  existing `autoArchiveAfter` backlog-limit fallback while also mapping it to
+  `completion_limit`.
 
 ## Legacy data mapping
 
@@ -63,7 +65,7 @@ or the `daily_check.db` filename.
 | `Task.durationMinutes` | `Routine` `PlannedDuration` |
 | `Task.startYmd` | `Routine.starts_on`, clamped against the local creation date |
 | `Task.autoArchiveAfter` | `Routine.completion_limit` |
-| `Task.repeatCount` | `Routine.occurrence_limit` |
+| `Task.repeatCount` | `Routine.occurrence_limit` (with the legacy `autoArchiveAfter` fallback when absent) |
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
 | derived scheduled Task/date slot | `Plan` when the adapter begins materializing date-specific plans |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
@@ -76,3 +78,33 @@ The current desktop adapter remains responsible for reading/writing these
 legacy collections. Moving the rules into core does not require a destructive
 database migration.
 
+## Migration baseline
+
+The pre-migration desktop rules were characterized against the following
+contracts and are now represented by Rust tests and Tauri adapter tests:
+
+- A routine is eligible only on its configured local weekdays and not before
+  `max(createdAt in the desktop local timezone, startYmd)`. A displayed week
+  contains scheduled dates plus completed dates, even when a completed date no
+  longer matches the current schedule.
+- `repeatCount` is a lifetime cap on planned occurrences. Completed dates are
+  retained inside the displayed period; when `repeatCount` is absent,
+  `autoArchiveAfter` remains the legacy backlog-cap fallback.
+- Completion toggles operate on the routine/date key, preserve unrelated
+  records, and do not imply tracked time. Reaching `autoArchiveAfter` archives
+  an active routine after the completion is added.
+- Starting a timer keeps at most one running session: another routine's
+  running session is stopped at the new start instant, while starting the same
+  routine again is rejected. Stopping can find a session started on an earlier
+  local day, and overnight work remains attributed to its start date.
+- Session actual minutes are floored elapsed timestamp minutes and may exceed
+  the planned duration. The persisted `minutes` column remains a compatibility
+  field; core calculations derive actual time from timestamps.
+- Weekly completion statistics count each active routine at most once when it
+  has any completion in the week. Period statistics count scheduled instances.
+  Planned and actual minute totals are aggregated separately.
+
+The explicit parity refinements from the stable domain model are that invalid
+planned durations are rejected by core, date constraints are applied without
+UTC conversion, and range statistics honor the routine's start/active
+eligibility rule.

@@ -46,3 +46,11 @@ export interface TaskDailyMemo {
   text: string; // (role: memo text, type: string)
   updatedAt: string; // (role: ISO timestamp, type: string)
 }
+
+// (role: core-derived task state for a local day, type: interface)
+export interface TaskDayState {
+  scheduled: boolean; // (role: scheduled by the core rule, type: boolean)
+  completed: boolean; // (role: completion signal, type: boolean)
+  completionCount: number; // (role: all-time completion count, type: number)
+  actualMinutes: number; // (role: core-derived actual minutes, type: number)
+}

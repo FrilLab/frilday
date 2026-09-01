@@ -1,5 +1,11 @@
 import { useContext } from 'react';
-import type { Completion, DayOfWeek, Task, TimeEntry } from '../types';
+import type {
+  Completion,
+  DayOfWeek,
+  Task,
+  TaskDayState,
+  TimeEntry,
+} from '../types';
 import { LocaleContext } from '../../../i18n/context';
 import { TaskListItem } from './TaskListItem';
 
@@ -33,6 +39,7 @@ interface TaskListProps {
   onStopTimer: (task: Task) => void;
 
   onError: (msg: string) => void;
+  taskDayStates: ReadonlyMap<string, TaskDayState>;
 }
 
 export function TaskList(props: TaskListProps) {
@@ -70,6 +77,7 @@ export function TaskList(props: TaskListProps) {
           onStartTimer={props.onStartTimer}
           onStopTimer={props.onStopTimer}
           onError={props.onError}
+          taskDayState={props.taskDayStates.get(t.id)}
         />
       ))}
     </div>

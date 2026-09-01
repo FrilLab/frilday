@@ -11,6 +11,8 @@ pub enum SessionError {
     MissingAssociation,
     EndBeforeStart,
     AlreadyStopped,
+    NoRunningSession,
+    RoutineAlreadyRunning,
     MultipleRunningSessions,
     DuplicateSessionId,
 }
@@ -23,6 +25,10 @@ impl fmt::Display for SessionError {
             }
             Self::EndBeforeStart => formatter.write_str("a session cannot end before it starts"),
             Self::AlreadyStopped => formatter.write_str("the session has already ended"),
+            Self::NoRunningSession => formatter.write_str("no running session was found"),
+            Self::RoutineAlreadyRunning => {
+                formatter.write_str("a session is already running for this routine")
+            }
             Self::MultipleRunningSessions => {
                 formatter.write_str("only one session may be running at a time")
             }
@@ -144,6 +150,68 @@ pub fn validate_no_concurrent_sessions(sessions: &[Session]) -> Result<(), Sessi
 
 pub fn running_session(sessions: &[Session]) -> Option<&Session> {
     sessions.iter().find(|session| session.is_running())
+}
+
+/// Start a session using the desktop timer policy: the currently running
+/// session is stopped at `started_at`, then the new session is inserted. A
+/// routine cannot be started twice without stopping it first.
+pub fn start_session(
+    sessions: &[Session],
+    new_session: Session,
+    started_at: Timestamp,
+) -> Result<Vec<Session>, SessionError> {
+    if started_at < new_session.started_at() {
+        return Err(SessionError::EndBeforeStart);
+    }
+    if !new_session.is_running() {
+        return Err(SessionError::AlreadyStopped);
+    }
+
+    let mut ledger = SessionLedger::try_from_sessions(sessions.to_vec())?;
+    if ledger.sessions().iter().any(|session| {
+        session.is_running()
+            && new_session
+                .routine_id()
+                .is_some_and(|routine_id| session.routine_id() == Some(routine_id))
+    }) {
+        return Err(SessionError::RoutineAlreadyRunning);
+    }
+
+    for session in &mut ledger.sessions {
+        if session.is_running() {
+            session.stop(started_at)?;
+        }
+    }
+
+    ledger.insert(new_session)?;
+    Ok(ledger.sessions)
+}
+
+/// Stop the first running session for a routine whose local tracking date is
+/// not later than `date`. This keeps sessions started before midnight
+/// controllable from the following local day.
+pub fn stop_session_for_routine(
+    sessions: &[Session],
+    routine_id: &RoutineId,
+    date: LocalDate,
+    ended_at: Timestamp,
+) -> Result<Vec<Session>, SessionError> {
+    let mut ledger = SessionLedger::try_from_sessions(sessions.to_vec())?;
+    let session = ledger
+        .sessions
+        .iter_mut()
+        .find(|session| {
+            session.is_running()
+                && session.routine_id() == Some(routine_id)
+                && session.date() <= date
+        })
+        .ok_or(SessionError::NoRunningSession)?;
+    session.stop(ended_at)?;
+    Ok(ledger.sessions)
+}
+
+pub fn running_routine_id(sessions: &[Session]) -> Option<&RoutineId> {
+    running_session(sessions).and_then(Session::routine_id)
 }
 
 /// A small aggregate for adapters that keep sessions in memory. It makes the

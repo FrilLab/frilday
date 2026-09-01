@@ -1,8 +1,11 @@
 import { useContext, useState } from 'react';
-import type { Completion, DayOfWeek, Task, TimeEntry } from '../types';
-import { isDoneOn } from '../../../domain/completion';
-import { isScheduledOn } from '../../../domain/schedule';
-import { totalTrackedMinutes } from '../../../domain/timeTracking';
+import type {
+  Completion,
+  DayOfWeek,
+  Task,
+  TaskDayState,
+  TimeEntry,
+} from '../types';
 import { Archive, Check, Pause, Pencil, Play, StickyNote } from 'lucide-react';
 import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
@@ -35,6 +38,7 @@ interface TaskListItemProps {
     autoArchiveAfter: number | null;
   }) => void; // (role: update task fields, type: ((input)=>void) | undefined)
   onError: (msg: string) => void; // (role: set error message, type: (string)=>void)
+  taskDayState?: TaskDayState;
 }
 
 export function TaskListItem(props: TaskListItemProps) {
@@ -42,11 +46,7 @@ export function TaskListItem(props: TaskListItemProps) {
 
   const {
     task,
-    completions,
-    timeEntries,
     todayYmd,
-    todayDow,
-    nowIso,
     runningTaskId,
     variant,
     memoText,
@@ -59,18 +59,17 @@ export function TaskListItem(props: TaskListItemProps) {
     onSaveMemo,
     onUpdateTaskMeta,
     onError,
+    taskDayState,
   } = props;
 
-  const scheduledToday = isScheduledOn(task, todayDow);
-  const doneToday = isDoneOn(completions, task.id, todayYmd);
+  const scheduledToday = taskDayState?.scheduled ?? false;
+  const doneToday = taskDayState?.completed ?? false;
 
   // (role: safe description string, type: string)
   const description = (task.description ?? '').trim();
 
   // (role: total completion count for this task, type: number)
-  const doneCountTotal = (completions ?? []).filter(
-    (c) => c.taskId === task.id,
-  ).length;
+  const doneCountTotal = taskDayState?.completionCount ?? 0;
 
   // (role: auto-archive progress "done/threshold", type: string | null)
   const autoArchiveProgressLabel =
@@ -78,17 +77,10 @@ export function TaskListItem(props: TaskListItemProps) {
       ? null
       : `(${Math.min(doneCountTotal, task.autoArchiveAfter)}/${task.autoArchiveAfter})`;
 
-  const safeTimeEntries = timeEntries ?? [];
-
   // Store policy: only ONE running entry is active at a time.
   const running = runningTaskId === task.id;
 
-  const totalMinutesToday = totalTrackedMinutes(
-    safeTimeEntries,
-    task.id,
-    todayYmd,
-    nowIso,
-  );
+  const totalMinutesToday = taskDayState?.actualMinutes ?? 0;
 
   const plannedMinutes = Math.max(0, task.durationMinutes || 0);
 

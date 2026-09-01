@@ -83,9 +83,11 @@ export default function App() {
               <TodayPage
                 todayYmd={m.todayYmd}
                 todayDow={m.todayDow}
-                tasks={m.tasks}
                 todayTasks={m.todayTasks}
                 todayStats={m.todayStats}
+                periodStats={m.periodStats}
+                todayTimeTotals={m.todayTimeTotals}
+                taskDayStates={m.taskDayStates}
                 completions={m.completions}
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
@@ -127,6 +129,7 @@ export default function App() {
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                taskDayStates={m.taskDayStates}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
               />

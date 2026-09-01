@@ -19,7 +19,7 @@ separately as a secondary signal.
 ```text
 src/
   app/              app wiring, pages, store, layout
-  domain/           desktop-side domain rules
+  domain/           task/memo helpers and display metadata
   features/         UI feature components
   i18n/             locale messages and translation
   infrastructure/   storage, notification, tauri adapters
@@ -49,5 +49,7 @@ macOS bundle output:
 
 - this app is the active product surface right now
 - the desktop runtime is local-first and does not require a local Axum server
-- server and shared core extraction are planned at the repo level
+- schedule, completion, session, timer, and statistics rules run through the
+  Tauri adapter backed by `crates/frilday-core`
+- SQLite persistence remains a desktop adapter concern
 - broader direction is documented in [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
