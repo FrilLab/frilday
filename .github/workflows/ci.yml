@@ -63,22 +63,10 @@ jobs:
             librsvg2-dev
 
       - name: Check Rust formatting
-        run: |
-          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
-          cargo fmt --manifest-path apps/server/Cargo.toml -- --check
-          cargo fmt --manifest-path crates/frilday-core/Cargo.toml -- --check
+        run: cargo fmt --all -- --check
 
-      - name: Check server crate
-        run: cargo check --manifest-path apps/server/Cargo.toml
+      - name: Check Rust workspace
+        run: cargo check --workspace
 
-      - name: Test server crate
-        run: cargo test --manifest-path apps/server/Cargo.toml
-
-      - name: Check core crate
-        run: cargo check --manifest-path crates/frilday-core/Cargo.toml
-
-      - name: Test core crate
-        run: cargo test --manifest-path crates/frilday-core/Cargo.toml
-
-      - name: Check desktop Tauri crate
-        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Test Rust workspace
+        run: cargo test --workspace

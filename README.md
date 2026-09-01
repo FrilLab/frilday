@@ -36,15 +36,28 @@ React → Tauri adapter → frilday-core → SQLite adapter
 
 The server is not required for the desktop runtime. See
 [AGENTS.md](AGENTS.md) for the permanent product guardrails and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the layer boundaries.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the layer boundaries. The
+domain vocabulary and legacy-record mapping are documented in
+[docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md).
+
+## Rust validation
+
+The repository-level Cargo workspace includes the core crate, future server
+adapter, and Tauri Rust crate. From the repository root:
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace
+cargo test --workspace
+```
 
 ## Current status
 
 - `apps/desktop` is the active application surface.
-- `apps/server` and `crates/frilday-core` are foundational pieces for the
-  separate future delivery path and ongoing domain extraction.
-- The current desktop scaffold still owns the active domain and SQLite
-  integration; the flow above is the target boundary for that extraction.
+- `apps/server` is a thin future delivery adapter and is not required by the
+  desktop runtime.
+- The current desktop scaffold still owns the React-facing domain and SQLite
+  integration while reusable rules are extracted into `frilday-core`.
 
 ## Desktop app
 

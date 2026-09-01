@@ -2,5 +2,7 @@
 name = "frilday-core"
 version = "0.1.0"
 edition = "2024"
+description = "Reusable FrilDay planning and time-tracking domain rules"
+repository = "https://github.com/FrilLab/frilday"
 
 [dependencies]
