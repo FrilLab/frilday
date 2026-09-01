@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { useDailyCheckStore } from '../src/app/store/useDailyCheckStore';
+import { useFrilDayStore } from '../src/app/store/useFrilDayStore';
 import { toggleCompletion } from '../src/domain/completion';
 import { pickWeeklySlots } from '../src/domain/schedule/scheduleLimit';
 import {
@@ -206,7 +206,7 @@ describe('application completion state', () => {
       },
     ];
 
-    useDailyCheckStore.setState({
+    useFrilDayStore.setState({
       hydrated: true,
       tasks: [task()],
       completions: [{ taskId: 'task-1', date: '2026-01-05' }],
@@ -215,12 +215,12 @@ describe('application completion state', () => {
       errorMsg: '',
     });
 
-    useDailyCheckStore.getState().toggleToday({
+    useFrilDayStore.getState().toggleToday({
       taskId: 'task-1',
       today: new Date(2026, 0, 5),
     });
 
-    expect(useDailyCheckStore.getState().completions).toEqual([]);
-    expect(useDailyCheckStore.getState().timeEntries).toEqual(timeEntries);
+    expect(useFrilDayStore.getState().completions).toEqual([]);
+    expect(useFrilDayStore.getState().timeEntries).toEqual(timeEntries);
   });
 });
