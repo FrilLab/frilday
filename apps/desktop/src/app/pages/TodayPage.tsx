@@ -13,6 +13,8 @@ import type {
   CoreTimeTotals,
 } from '../../infrastructure/tauri/core';
 import { LocaleContext } from '../../i18n/context';
+import { ActiveTimer } from '../../features/timer/components/ActiveTimer';
+import type { ActiveTimerPhase } from '../../features/timer/activeTimerModel';
 
 // (role: clamp helper, type: (number, number, number)=>number)
 function clamp(v: number, min: number, max: number): number {
@@ -61,6 +63,8 @@ export function TodayPage(props: {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  activeTimerTask: Task | null; // (role: selected execution task, type: Task | null)
+  activeTimerPhase: ActiveTimerPhase; // (role: execution phase, type: ActiveTimerPhase)
 
   getMemoText: (taskId: string, date: string) => string;
   onSaveMemo: (input: { taskId: string; date: string; text: string }) => void;
@@ -69,6 +73,9 @@ export function TodayPage(props: {
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
+  onPauseTimer: (task: Task) => void; // (role: pause timer, type: (Task)=>void)
+  onResumeTimer: (task: Task) => void; // (role: resume timer, type: (Task)=>void)
+  onFinishTimer: (task: Task) => void; // (role: finish timer, type: (Task)=>void)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
 }) {
   const { t } = useContext(LocaleContext);
@@ -86,12 +93,17 @@ export function TodayPage(props: {
     timeEntries,
     nowIso,
     runningTaskId,
+    activeTimerTask,
+    activeTimerPhase,
     getMemoText,
     onSaveMemo,
     onToggleToday,
     onArchive,
     onStartTimer,
     onStopTimer,
+    onPauseTimer,
+    onResumeTimer,
+    onFinishTimer,
     onError,
   } = props;
 
@@ -168,6 +180,20 @@ export function TodayPage(props: {
       </aside>
 
       <main className="min-w-0 space-y-4">
+        {activeTimerTask && (
+          <ActiveTimer
+            task={activeTimerTask}
+            timeEntries={timeEntries}
+            dateYmd={todayYmd}
+            nowIso={nowIso}
+            phase={activeTimerPhase}
+            onStart={() => onStartTimer(activeTimerTask)}
+            onPause={() => onPauseTimer(activeTimerTask)}
+            onResume={() => onResumeTimer(activeTimerTask)}
+            onFinish={() => onFinishTimer(activeTimerTask)}
+          />
+        )}
+
         <section className="hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 md:block">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
