@@ -11,13 +11,17 @@ import {
   deleteTask as deletePersistedTask,
   loadAppData,
   saveTask,
+  saveAutoStopTransition,
   saveTaskDailyMemo,
   saveTimeEntries,
   setCompletion,
   setTaskActive,
 } from '../../infrastructure/storage';
 import { toYmd } from '../../shared/utils/date';
-import { createSerialQueue } from '../../shared/utils/serialQueue';
+import {
+  createSerialQueue,
+  type AsyncOperation,
+} from '../../shared/utils/serialQueue';
 import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
@@ -92,10 +96,10 @@ function formatError(error: unknown): string {
 }
 
 function persist(
-  operation: Promise<void>,
+  operation: AsyncOperation,
   failureMessage: string,
 ): void {
-  void operation.catch((error) => {
+  void enqueuePersistence(operation).catch((error) => {
     console.error(failureMessage, error);
     useFrilDayStore.setState({
       errorMsg: `${failureMessage} ${formatError(error)}`,
@@ -103,6 +107,7 @@ function persist(
   });
 }
 
+const enqueuePersistence = createSerialQueue();
 const enqueueCompletionToggle = createSerialQueue();
 
 export const useFrilDayStore = create<FrilDayState>((set, get) => ({
@@ -175,7 +180,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       const nextTasks = [task, ...get().tasks];
 
       set({ tasks: nextTasks, errorMsg: '' });
-      persist(saveTask(task), 'Failed to save task.');
+      persist(() => saveTask(task), 'Failed to save task.');
     } catch (e) {
       set({
         errorMsg: e instanceof Error ? e.message : 'Failed to create task.',
@@ -239,7 +244,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     const nextTask = nextTasks.find((task) => task.id === taskId);
 
     set({ tasks: nextTasks, errorMsg: '' });
-    if (nextTask) persist(saveTask(nextTask), 'Failed to update task.');
+    if (nextTask) persist(() => saveTask(nextTask), 'Failed to update task.');
   },
 
   archiveTask: (taskId) => {
@@ -248,7 +253,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     );
 
     set({ tasks: nextTasks, errorMsg: '' });
-    persist(setTaskActive(taskId, false), 'Failed to archive task.');
+    persist(
+      () => setTaskActive(taskId, false),
+      'Failed to archive task.',
+    );
   },
 
   restoreTask: (taskId) => {
@@ -257,7 +265,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     );
 
     set({ tasks: nextTasks, errorMsg: '' });
-    persist(setTaskActive(taskId, true), 'Failed to restore task.');
+    persist(
+      () => setTaskActive(taskId, true),
+      'Failed to restore task.',
+    );
   },
 
   deleteTask: (taskId) => {
@@ -277,7 +288,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       taskDailyMemos: nextMemos,
       errorMsg: '',
     });
-    persist(deletePersistedTask(taskId), 'Failed to delete task.');
+    persist(() => deletePersistedTask(taskId), 'Failed to delete task.');
   },
 
   toggleToday: ({ taskId, today }) =>
@@ -315,19 +326,20 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
 
         set({ ...next, errorMsg: '' });
         persist(
-          Promise.all([
-            setCompletion(
-              taskId,
-              date,
-              result.completions.some(
-                (completion) =>
-                  completion.taskId === taskId && completion.date === date,
+          () =>
+            Promise.all([
+              setCompletion(
+                taskId,
+                date,
+                result.completions.some(
+                  (completion) =>
+                    completion.taskId === taskId && completion.date === date,
+                ),
               ),
-            ),
-            ...(result.autoArchived
-              ? [setTaskActive(taskId, false)]
-              : []),
-          ]).then(() => undefined),
+              ...(result.autoArchived
+                ? [setTaskActive(taskId, false)]
+                : []),
+            ]).then(() => undefined),
           'Failed to update completion.',
         );
       } catch (error) {
@@ -353,7 +365,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     };
 
     set({ taskDailyMemos: nextMemos, errorMsg: '' });
-    persist(saveTaskDailyMemo(memo), 'Failed to save memo.');
+    persist(() => saveTaskDailyMemo(memo), 'Failed to save memo.');
   },
 
   startTimer: async ({ taskId, today }) => {
@@ -370,7 +382,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         startedAt: nowIso,
       });
       set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persist(saveTimeEntries(nextTimeEntries), 'Failed to start timer.');
+      persist(
+        () => saveTimeEntries(nextTimeEntries),
+        'Failed to start timer.',
+      );
     } catch (error) {
       set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
     }
@@ -387,7 +402,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         endedAt: nowIso,
       });
       set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persist(saveTimeEntries(nextTimeEntries), 'Failed to stop timer.');
+      persist(
+        () => saveTimeEntries(nextTimeEntries),
+        'Failed to stop timer.',
+      );
     } catch (error) {
       set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
     }
@@ -443,12 +461,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       errorMsg: '',
     });
     persist(
-      Promise.all([
-        saveTimeEntries(result.timeEntries),
-        ...addedCompletions.map((completion) =>
-          setCompletion(completion.taskId, completion.date, true),
-        ),
-      ]).then(() => undefined),
+      () => saveAutoStopTransition(result.timeEntries, addedCompletions),
       'Failed to auto-stop timer.',
     );
 

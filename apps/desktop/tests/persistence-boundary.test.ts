@@ -46,6 +46,7 @@ describe('Tauri persistence boundary', () => {
     });
     await appDb.setCompletion('task-1', '2026-01-05', true);
     await appDb.saveTimeEntries([]);
+    await appDb.saveAutoStopTransition([], []);
     await appDb.saveTaskDailyMemo({
       id: 'task-1_2026-01-05',
       taskId: 'task-1',
@@ -60,6 +61,7 @@ describe('Tauri persistence boundary', () => {
       'save_task',
       'set_completion',
       'save_time_entries',
+      'save_auto_stop_transition',
       'save_task_daily_memo',
     ]);
     expect(calls.some((call) => call.command.includes('sql'))).toBe(false);

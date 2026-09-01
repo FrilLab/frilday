@@ -19,6 +19,7 @@ pub fn run() {
             persistence::delete_task,
             persistence::set_completion,
             persistence::save_time_entries,
+            persistence::save_auto_stop_transition,
             persistence::save_task_daily_memo,
             persistence::get_setting,
             persistence::set_setting,

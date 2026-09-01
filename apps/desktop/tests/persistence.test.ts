@@ -75,6 +75,7 @@ const fakeAppDb = {
   deleteTask: async () => undefined,
   setCompletion: async () => undefined,
   saveTimeEntries: async () => undefined,
+  saveAutoStopTransition: async () => undefined,
   saveTaskDailyMemo: async () => undefined,
   getSetting: async () => null,
   setSetting: async () => undefined,

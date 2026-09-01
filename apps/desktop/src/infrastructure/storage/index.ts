@@ -200,6 +200,15 @@ export async function saveTimeEntries(entries: TimeEntry[]): Promise<void> {
   await appDb.saveTimeEntries(entries);
 }
 
+export async function saveAutoStopTransition(
+  timeEntries: TimeEntry[],
+  completions: Completion[],
+): Promise<void> {
+  if (!isTauri()) return;
+  await ensureLegacyMigration();
+  await appDb.saveAutoStopTransition(timeEntries, completions);
+}
+
 export async function saveTaskDailyMemo(memo: TaskDailyMemo): Promise<void> {
   if (!isTauri()) return;
   await ensureLegacyMigration();

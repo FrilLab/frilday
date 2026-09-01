@@ -84,6 +84,13 @@ pub struct CompletionStateRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AutoStopTransitionRequest {
+    pub time_entries: Vec<TimeEntryRecord>,
+    pub completions: Vec<CompletionRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingRequest {
     pub key: String,
     pub value: Value,
@@ -726,6 +733,35 @@ pub async fn save_time_entries(
         .map_err(|error| format!("Failed to commit app data transaction: {error}"))
 }
 
+async fn save_auto_stop_transition_to_pool(
+    pool: &SqlitePool,
+    request: &AutoStopTransitionRequest,
+) -> Result<(), String> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin app data transaction: {error}"))?;
+    for entry in &request.time_entries {
+        insert_time_entry(&mut transaction, entry).await?;
+    }
+    for completion in &request.completions {
+        insert_completion(&mut transaction, completion).await?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Failed to commit app data transaction: {error}"))
+}
+
+#[tauri::command]
+pub async fn save_auto_stop_transition(
+    db_instances: State<'_, DbInstances>,
+    request: AutoStopTransitionRequest,
+) -> Result<(), String> {
+    let pool = database_pool(&db_instances).await?;
+    save_auto_stop_transition_to_pool(&pool, &request).await
+}
+
 #[tauri::command]
 pub async fn save_task_daily_memo(
     db_instances: State<'_, DbInstances>,
@@ -920,6 +956,80 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0);
             assert_eq!(migration_marker(&pool).await.unwrap(), None);
+        });
+    }
+
+    #[test]
+    fn auto_stop_transition_commits_entries_and_completions_together() {
+        tauri::async_runtime::block_on(async {
+            let pool = test_pool().await;
+            let request = AutoStopTransitionRequest {
+                time_entries: vec![TimeEntryRecord {
+                    id: "entry-1".to_owned(),
+                    task_id: "task-1".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                    started_at: "2026-01-05T09:00:00.000Z".to_owned(),
+                    ended_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
+                    minutes: 30,
+                }],
+                completions: vec![CompletionRecord {
+                    task_id: "task-1".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                }],
+            };
+
+            save_auto_stop_transition_to_pool(&pool, &request)
+                .await
+                .unwrap();
+
+            let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_entries")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            let completions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM completions")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(entries, 1);
+            assert_eq!(completions, 1);
+        });
+    }
+
+    #[test]
+    fn failed_auto_stop_transition_rolls_back_all_records() {
+        tauri::async_runtime::block_on(async {
+            let pool = test_pool().await;
+            sqlx::query(
+                "CREATE TRIGGER fail_auto_stop_completion
+                 BEFORE INSERT ON completions
+                 BEGIN SELECT RAISE(ABORT, 'completion insert failed'); END",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            let request = AutoStopTransitionRequest {
+                time_entries: vec![TimeEntryRecord {
+                    id: "entry-1".to_owned(),
+                    task_id: "task-1".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                    started_at: "2026-01-05T09:00:00.000Z".to_owned(),
+                    ended_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
+                    minutes: 30,
+                }],
+                completions: vec![CompletionRecord {
+                    task_id: "task-1".to_owned(),
+                    date: "2026-01-05".to_owned(),
+                }],
+            };
+
+            assert!(save_auto_stop_transition_to_pool(&pool, &request)
+                .await
+                .is_err());
+            let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_entries")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(entries, 0);
         });
     }
 }
