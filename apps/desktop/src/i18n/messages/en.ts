@@ -36,8 +36,13 @@ export const en = {
     schedule: 'Schedule',
     days: 'Days',
     plan: 'Plan',
+    planned: 'Planned',
+    actualTracked: 'Tracked',
     todaySpent: 'Today',
     todayTasksDescription: 'Only tasks scheduled for today are shown here.',
+    todayTasksDuringExecution:
+      'The current session stays in focus while today’s plan remains available below.',
+    plansToday: 'plans',
     manageTasks: 'Manage tasks',
     manageTasksDescription: 'Your tasks list with the current filters.',
     filters: 'Filters',
@@ -91,8 +96,11 @@ export const en = {
   time: {
     durationMin: 'Duration (min)',
     basedOnTodayPlannedMinutes: "Based on today's planned minutes.",
+    plannedVsActual: 'Tracked / planned',
+    trackedToday: 'Actual time tracked today',
     start: 'Start',
     stop: 'Stop',
+    resume: 'Resume',
     hourShort: 'h',
     minuteShort: 'm',
     day: {
@@ -128,6 +136,14 @@ export const en = {
     resume: 'Resume',
     finish: 'Finish',
     backToPlan: 'Back to plan',
+    switchConfirm:
+      'Switch from "{current}" to "{next}"? The current session will be stopped and the new plan will start.',
+  },
+
+  today: {
+    executionHint: 'Start the next plan when you are ready.',
+    activeExecutionHint:
+      'Stay with the current plan. Its actual time is updating now.',
   },
 
   period: {

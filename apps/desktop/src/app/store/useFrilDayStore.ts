@@ -109,6 +109,9 @@ function persist(
 
 const enqueuePersistence = createSerialQueue();
 const enqueueCompletionToggle = createSerialQueue();
+// Serialize starts and stops so two quick actions cannot observe the same
+// stale session list and create competing active sessions.
+const enqueueTimerMutation = createSerialQueue();
 
 export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   hydrated: false,
@@ -368,48 +371,50 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     persist(() => saveTaskDailyMemo(memo), 'Failed to save memo.');
   },
 
-  startTimer: async ({ taskId, today }) => {
-    const date = toYmd(today);
-    const nowIso = new Date().toISOString();
+  startTimer: ({ taskId, today }) =>
+    enqueueTimerMutation(async () => {
+      const date = toYmd(today);
+      const nowIso = new Date().toISOString();
 
-    const entries = get().timeEntries;
-    try {
-      const nextTimeEntries = await startTimerWithCore({
-        timeEntries: entries,
-        sessionId: uid(),
-        taskId,
-        dateYmd: date,
-        startedAt: nowIso,
-      });
-      set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persist(
-        () => saveTimeEntries(nextTimeEntries),
-        'Failed to start timer.',
-      );
-    } catch (error) {
-      set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
-    }
-  },
+      const entries = get().timeEntries;
+      try {
+        const nextTimeEntries = await startTimerWithCore({
+          timeEntries: entries,
+          sessionId: uid(),
+          taskId,
+          dateYmd: date,
+          startedAt: nowIso,
+        });
+        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        persist(
+          () => saveTimeEntries(nextTimeEntries),
+          'Failed to start timer.',
+        );
+      } catch (error) {
+        set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
+      }
+    }),
 
-  stopTimer: async ({ taskId, today }) => {
-    const date = toYmd(today);
-    const nowIso = new Date().toISOString();
-    try {
-      const nextTimeEntries = await stopTimerWithCore({
-        timeEntries: get().timeEntries,
-        taskId,
-        dateYmd: date,
-        endedAt: nowIso,
-      });
-      set({ timeEntries: nextTimeEntries, errorMsg: '' });
-      persist(
-        () => saveTimeEntries(nextTimeEntries),
-        'Failed to stop timer.',
-      );
-    } catch (error) {
-      set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
-    }
-  },
+  stopTimer: ({ taskId, today }) =>
+    enqueueTimerMutation(async () => {
+      const date = toYmd(today);
+      const nowIso = new Date().toISOString();
+      try {
+        const nextTimeEntries = await stopTimerWithCore({
+          timeEntries: get().timeEntries,
+          taskId,
+          dateYmd: date,
+          endedAt: nowIso,
+        });
+        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        persist(
+          () => saveTimeEntries(nextTimeEntries),
+          'Failed to stop timer.',
+        );
+      } catch (error) {
+        set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
+      }
+    }),
 
   autoStopIfReached: async () => {
     if (!get().hydrated) return [];

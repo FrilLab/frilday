@@ -50,16 +50,6 @@ export default function App() {
                 <h1 className="text-2xl font-semibold tracking-tight">
                   FrilDay
                 </h1>
-
-                <div className="mb-3 block sm:hidden">
-                  <h2 className="text-base font-semibold text-zinc-100">
-                    {t('common.today')}
-                  </h2>
-                  <p className="mt-1 text-sm text-zinc-400">
-                    {m.todayYmd}{' '}
-                    <span className="text-zinc-500">({m.todayDow})</span>
-                  </p>
-                </div>
               </div>
 
               <div className="md:pt-1">
@@ -81,7 +71,6 @@ export default function App() {
                 todayDow={m.todayDow}
                 todayTasks={m.todayTasks}
                 todayStats={m.todayStats}
-                periodStats={m.periodStats}
                 todayTimeTotals={m.todayTimeTotals}
                 taskDayStates={m.taskDayStates}
                 completions={m.completions}

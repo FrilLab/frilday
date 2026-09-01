@@ -5,6 +5,7 @@ import type { Task, TaskDayState } from '../../shared/types';
 import type { Tab } from '../layout/HeaderTabs';
 import type { CreateTaskInput } from '../../features/task/components/TaskForm';
 import type { ActiveTimerPhase } from '../../features/timer/activeTimerModel';
+import { useLocale } from '../../i18n/useLocale';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
 import {
@@ -46,6 +47,7 @@ function monthStartYmd(ymd: string): string {
 }
 
 export function useAppModel() {
+  const { t } = useLocale();
   const {
     hydrated,
     tasks,
@@ -101,6 +103,9 @@ export function useAppModel() {
   );
   const [activeTimerPhase, setActiveTimerPhase] =
     useState<ActiveTimerPhase>('ready');
+  const [pendingTimerTaskId, setPendingTimerTaskId] = useState<string | null>(
+    null,
+  );
   const [scheduleSlots, setScheduleSlots] = useState<
     Awaited<ReturnType<typeof getVisibleScheduleSlots>>
   >([]);
@@ -274,8 +279,44 @@ export function useAppModel() {
       if (running) return running;
     }
 
-    return todayTasks.find((task) => !visibleToday.get(task.id)?.completed) ?? null;
-  }, [activeTimerTaskId, runningTaskId, tasks, todayTasks, visibleToday]);
+    return null;
+  }, [activeTimerTaskId, runningTaskId, tasks]);
+
+  // Adopt a session restored from storage so it remains visible after an
+  // automatic stop as a finished execution instead of disappearing abruptly.
+  useEffect(() => {
+    if (runningTaskId == null || activeTimerTaskId != null) return;
+    setActiveTimerTaskId(runningTaskId);
+    setActiveTimerPhase('running');
+  }, [activeTimerTaskId, runningTaskId]);
+
+  // Auto-stop ends the persisted session without going through the button
+  // handlers. Reflect that transition in the execution surface once the
+  // running-session lookup catches up.
+  useEffect(() => {
+    if (
+      !hydrated ||
+      activeTimerTaskId == null ||
+      activeTimerPhase !== 'running' ||
+      pendingTimerTaskId === activeTimerTaskId
+    ) {
+      return;
+    }
+
+    const hasRunningEntry = timeEntries.some(
+      (entry) => entry.taskId === activeTimerTaskId && entry.endedAt == null,
+    );
+    if (runningTaskId == null && !hasRunningEntry) {
+      setActiveTimerPhase('finished');
+    }
+  }, [
+    activeTimerPhase,
+    activeTimerTaskId,
+    hydrated,
+    pendingTimerTaskId,
+    runningTaskId,
+    timeEntries,
+  ]);
 
   const activeTimerPhaseForView: ActiveTimerPhase =
     activeTimerTask == null
@@ -283,11 +324,7 @@ export function useAppModel() {
       : runningTaskId === activeTimerTask.id
         ? 'running'
         : activeTimerTaskId === activeTimerTask.id
-          ? activeTimerPhase === 'paused'
-            ? 'paused'
-            : activeTimerPhase === 'finished'
-              ? 'finished'
-              : 'ready'
+          ? activeTimerPhase
           : 'ready';
 
   const setError = (msg: string) =>
@@ -355,10 +392,34 @@ export function useAppModel() {
   };
 
   // 실시간을 위해 today(useMemo) 대신 현재 날짜 받기
-  const handleStartTimer = (task: Task) => {
+  const handleStartTimer = async (task: Task) => {
+    const currentTask =
+      runningTaskId == null
+        ? activeTimerPhase === 'running'
+          ? activeTimerTask
+          : null
+        : tasks.find((candidate) => candidate.id === runningTaskId) ?? null;
+
+    if (currentTask && currentTask.id !== task.id) {
+      const shouldSwitch = window.confirm(
+        t('timer.switchConfirm', {
+          current: currentTask.title,
+          next: task.title,
+        }),
+      );
+      if (!shouldSwitch) return;
+    }
+
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('running');
-    startTimer({ taskId: task.id, today: new Date() });
+    setPendingTimerTaskId(task.id);
+    try {
+      await startTimer({ taskId: task.id, today: new Date() });
+    } finally {
+      setPendingTimerTaskId((pending) =>
+        pending === task.id ? null : pending,
+      );
+    }
 
     notifier.notify({
       level: 'info',
@@ -366,20 +427,27 @@ export function useAppModel() {
     });
   };
 
-  const handleStopTimer = (task: Task) => {
+  const handleStopTimer = async (task: Task) => {
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('paused');
-    stopTimer({ taskId: task.id, today: new Date() });
+    await stopTimer({ taskId: task.id, today: new Date() });
     notifier.notify({
       level: 'info',
       message: `Timer paused`,
     });
   };
 
-  const handleResumeTimer = (task: Task) => {
+  const handleResumeTimer = async (task: Task) => {
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('running');
-    startTimer({ taskId: task.id, today: new Date() });
+    setPendingTimerTaskId(task.id);
+    try {
+      await startTimer({ taskId: task.id, today: new Date() });
+    } finally {
+      setPendingTimerTaskId((pending) =>
+        pending === task.id ? null : pending,
+      );
+    }
 
     notifier.notify({
       level: 'info',

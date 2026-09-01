@@ -37,8 +37,13 @@ export const ja = {
     schedule: '予定',
     days: '曜日',
     plan: '計画',
+    planned: '予定',
+    actualTracked: '実績',
     todaySpent: '今日',
     todayTasksDescription: 'ここには今日予定されているタスクのみ表示されます。',
+    todayTasksDuringExecution:
+      '現在のセッションに集中しながら、下で今日の予定を確認できます。',
+    plansToday: '件の予定',
     manageTasks: 'タスク管理',
     manageTasksDescription: '現在のフィルターが適用されたタスクリストです。',
     filters: 'フィルター',
@@ -91,8 +96,11 @@ export const ja = {
   time: {
     durationMin: '時間 (分)',
     basedOnTodayPlannedMinutes: '今日の予定時間(分)を基準にしています。',
+    plannedVsActual: '実績 / 予定',
+    trackedToday: '今日記録した実績時間',
     start: '開始',
     stop: '停止',
+    resume: '再開',
     hourShort: '時間',
     minuteShort: '分',
     day: {
@@ -128,6 +136,13 @@ export const ja = {
     resume: '再開',
     finish: '終了',
     backToPlan: '予定に戻る',
+    switchConfirm:
+      '「{current}」から「{next}」に切り替えますか？現在のセッションを停止して新しい予定を開始します。',
+  },
+
+  today: {
+    executionHint: '準備ができたら次の予定を開始しましょう。',
+    activeExecutionHint: '現在の予定に集中してください。実績時間を記録しています。',
   },
 
   period: {

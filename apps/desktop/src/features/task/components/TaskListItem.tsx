@@ -39,6 +39,7 @@ interface TaskListItemProps {
   }) => void; // (role: update task fields, type: ((input)=>void) | undefined)
   onError: (msg: string) => void; // (role: set error message, type: (string)=>void)
   taskDayState?: TaskDayState;
+  isExecutionFocused?: boolean;
 }
 
 export function TaskListItem(props: TaskListItemProps) {
@@ -60,6 +61,7 @@ export function TaskListItem(props: TaskListItemProps) {
     onUpdateTaskMeta,
     onError,
     taskDayState,
+    isExecutionFocused,
   } = props;
 
   const scheduledToday = taskDayState?.scheduled ?? false;
@@ -83,6 +85,7 @@ export function TaskListItem(props: TaskListItemProps) {
   const totalMinutesToday = taskDayState?.actualMinutes ?? 0;
 
   const plannedMinutes = Math.max(0, task.durationMinutes || 0);
+  const hasTrackedTime = totalMinutesToday > 0;
 
   // Completion and tracked time are independent. A manual completion must not
   // make the actual-time progress look like the planned time was spent.
@@ -189,6 +192,7 @@ export function TaskListItem(props: TaskListItemProps) {
           ? 'border-zinc-800 bg-zinc-950/40'
           : 'border-zinc-900 bg-zinc-950/20 opacity-80',
         variant == 'today' ? 'xl:px-5 xl:pt-5' : '',
+        isExecutionFocused && running && 'border-emerald-300/30',
       )}>
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 w-full md:max-w-[64%]">
@@ -197,9 +201,11 @@ export function TaskListItem(props: TaskListItemProps) {
               {task.title}
             </div>
 
-            <span className="rounded-full border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-xs text-zinc-300">
-              {categoryLabel}
-            </span>
+            {variant === 'manage' && (
+              <span className="rounded-full border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-xs text-zinc-300">
+                {categoryLabel}
+              </span>
+            )}
 
             {!task.isActive && (
               <span className="rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-xs text-zinc-300">
@@ -208,25 +214,29 @@ export function TaskListItem(props: TaskListItemProps) {
             )}
           </div>
 
-          {description && (
+          {description && variant === 'manage' && (
             <p className="mt-1 truncate text-xs text-zinc-400">{description}</p>
           )}
 
           <div className="mt-1 text-xs text-zinc-500">
-            <span
-              className={clsx(
-                variant == 'today' ? 'hidden md:inline-block' : 'inline-block',
-              )}>
-              {tr('task.days')}: {daysLabel} ·
-            </span>{' '}
-            {tr('task.plan')}: {task.durationMinutes}
-            {tr('time.minuteShort')}{' '}
-            <span
-              className={clsx(variant == 'today' ? 'inline-block' : 'hidden')}>
-              · {tr('task.todaySpent')}:{' '}
-              {totalMinutesToday}
-              {tr('time.minuteShort')}
-            </span>
+            {variant === 'manage' && (
+              <span>
+                {tr('task.days')}: {daysLabel} ·{' '}
+              </span>
+            )}
+            {variant === 'manage' ? (
+              <>
+                {tr('task.plan')}: {task.durationMinutes}
+                {tr('time.minuteShort')}
+              </>
+            ) : (
+              <>
+                {tr('task.planned')}: {plannedMinutes}
+                {tr('time.minuteShort')} · {tr('task.actualTracked')}:{' '}
+                {totalMinutesToday}
+                {tr('time.minuteShort')}
+              </>
+            )}
             {task.autoArchiveAfter != null && (
               <span className="ml-2 text-zinc-400">
                 · {tr('task.autoArchiveAfter')}: {autoArchiveProgressLabel}
@@ -234,7 +244,7 @@ export function TaskListItem(props: TaskListItemProps) {
             )}
             {running && (
               <span className="ml-2 text-emerald-200">
-                {tr('common.running')}
+                · {tr('common.running')}
               </span>
             )}
             {!scheduledToday && (
@@ -296,7 +306,7 @@ export function TaskListItem(props: TaskListItemProps) {
               ) : (
                 <span className="flex items-center gap-1">
                   <Play size={14} />
-                  {tr('time.start')}
+                  {hasTrackedTime ? tr('time.resume') : tr('time.start')}
                 </span>
               )}
             </button>
