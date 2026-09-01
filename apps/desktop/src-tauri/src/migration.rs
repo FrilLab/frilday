@@ -1,7 +1,16 @@
 use std::{fs, path::PathBuf};
 
+use tauri::Manager;
+
+// This filename is persisted user data; changing it requires a migration.
 const DB_FILE_NAME: &str = "daily_check.db";
-const LEGACY_IDENTIFIERS: [&str; 2] = ["com.mars112.dailycheck", "dailycheck"];
+// Keep all prior identifiers so changing the product identifier does not
+// strand an existing local database.
+const LEGACY_IDENTIFIERS: [&str; 3] = [
+  "app.dailycheck",
+  "com.mars112.dailycheck",
+  "dailycheck",
+];
 
 pub fn migrate_legacy_app_data_dir(app: &tauri::AppHandle) -> tauri::Result<()> {
   let current_data_dir: PathBuf = match app.path().app_data_dir() {

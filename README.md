@@ -1,49 +1,68 @@
 # FrilDay
 
-FrilDay is a productivity app centered on planned time, completion, and repeatable routines.
+FrilDay is a **timer-first time planning application**. It helps people plan
+executable time, focus with a timer, record actual investment, review the gap
+between planned and actual time, and adjust future plans.
 
-The repository is being organized as a monorepo with a desktop-first release path and a longer-term cloud architecture.
+The product loop is:
+
+```text
+Plan → Execute → Track → Review → Adjust
+```
+
+Completion is useful context, but it is secondary to time investment. The
+desktop v0.1 release is local-first, and the active timer plus today's
+executable plan are the primary product surface.
 
 ## Workspace
 
 ```text
 apps/
-  desktop/        Tauri + React client
-  server/         Axum server skeleton
+  desktop/        Tauri + React desktop client
+  server/         Future Axum delivery adapter
 
 crates/
-  frilday-core/   Shared core crate skeleton
+  frilday-core/   Reusable domain and application rules
 
 docs/
   ARCHITECTURE.md
 ```
 
-## Current Status
+The desktop v0.1 runtime is:
 
-- `apps/desktop` is the active application
-- `apps/server` exists as a bootstrap crate
-- `crates/frilday-core` exists as a bootstrap crate
-- architecture direction is documented in [docs/ARCHITECTURE.md](/Users/mars112/code/project/frilday/docs/ARCHITECTURE.md)
+```text
+React → Tauri adapter → frilday-core → SQLite adapter
+```
 
-## Desktop App
+The server is not required for the desktop runtime. See
+[AGENTS.md](AGENTS.md) for the permanent product guardrails and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the layer boundaries.
 
-From the repo root:
+## Current status
+
+- `apps/desktop` is the active application surface.
+- `apps/server` and `crates/frilday-core` are foundational pieces for the
+  separate future delivery path and ongoing domain extraction.
+
+## Desktop app
+
+From the repository root:
 
 ```bash
 cd apps/desktop
-npm run build
+bun run build
 bunx tauri build
 ```
 
-Local packaged app output:
+The macOS bundle is generated at:
 
-- `apps/desktop/src-tauri/target/release/bundle/macos/dailycheck.app`
+```text
+apps/desktop/src-tauri/target/release/bundle/macos/FrilDay.app
+```
 
 ## Workflow
 
-- keep `main` buildable
-- use short-lived branches
-- prefer small PRs by layer
-- avoid committing generated outputs
-
-More detail lives in [docs/ARCHITECTURE.md](/Users/mars112/code/project/frilday/docs/ARCHITECTURE.md).
+- Keep `main` buildable.
+- Use short-lived branches and small, focused changes.
+- Keep UI and adapters thin; put reusable rules in `crates/frilday-core`.
+- Avoid committing generated outputs.
