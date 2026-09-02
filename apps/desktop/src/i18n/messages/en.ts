@@ -217,9 +217,10 @@ export const en = {
     weekSummary: '{days} planned days · {plans} plans',
     planningHint: 'Plan the week around time budget. Routine defaults stay unchanged.',
     durationHint: 'Durations and skips here apply to this date only. Open Routine for recurring defaults.',
+    capacity: 'Daily capacity: {duration}',
     noPlansForDay: 'No plans for this day.',
     allSkipped: 'All plans skipped',
-    highLoad: 'High planned load (8h or more)',
+    highLoad: 'Over daily capacity: {planned} planned / {capacity} capacity',
     adjustPlan: 'Adjust plan',
     adjustPlanHint: 'Changes apply to this date only.',
     pastReadOnly: 'Past plans are read-only',
@@ -235,6 +236,8 @@ export const en = {
     routine: 'Routine',
     openRoutine: 'Open routine {task}',
     movedPlanHint: 'Moved Plans are adjusted from their original date.',
+    moveTo: 'Move to date',
+    movePlan: 'Move plan',
   },
 
   notify: {
@@ -257,6 +260,13 @@ export const en = {
         ko: 'Korean',
         ja: 'Japanese',
       },
+    },
+    capacity: {
+      title: 'Daily planning capacity',
+      desc: 'Use a transparent daily time budget to spot over-planned days.',
+      label: 'Minutes per day',
+      range: 'Choose from 1 to 1440 minutes. This is advisory and never blocks planning.',
+      validation: 'Capacity must be a whole number from 1 to 1440 minutes.',
     },
     notifications: {
       timerDone: {

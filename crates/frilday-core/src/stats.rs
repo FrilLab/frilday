@@ -163,7 +163,7 @@ pub enum RoutineCategory {
     Custom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CompletionTotals {
     scheduled_count: u64,
     completed_count: u64,
@@ -409,13 +409,4 @@ fn date_range(start: LocalDate, end: LocalDate) -> Vec<LocalDate> {
         current = current.checked_add_days(1).expect("bounded date range");
     }
     dates
-}
-
-impl Default for CompletionTotals {
-    fn default() -> Self {
-        Self {
-            scheduled_count: 0,
-            completed_count: 0,
-        }
-    }
 }

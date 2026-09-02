@@ -205,6 +205,20 @@ export async function getVisibleScheduleSlots(input: {
   });
 }
 
+export async function hasVirtualPlanOnDateWithCore(input: {
+  tasks: Task[];
+  completions: Completion[];
+  taskId: string;
+  dateYmd: string;
+}): Promise<boolean> {
+  return invokeCore<boolean>('core_virtual_plan_exists', {
+    tasks: input.tasks.map(toCoreTask),
+    completions: input.completions.map(toCoreCompletion),
+    taskId: input.taskId,
+    dateYmd: input.dateYmd,
+  });
+}
+
 export async function toggleCompletionWithCore(input: {
   tasks: Task[];
   completions: Completion[];

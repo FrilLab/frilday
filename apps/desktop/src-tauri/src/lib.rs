@@ -27,6 +27,7 @@ pub fn run() {
             persistence::get_migration_marker,
             persistence::set_migration_marker,
             core_commands::core_visible_schedule,
+            core_commands::core_virtual_plan_exists,
             core_commands::core_toggle_completion,
             core_commands::core_statistics,
             core_commands::core_time_totals,

@@ -162,10 +162,17 @@ export default function App() {
                 onSetPlanDuration={m.setPlanDurationOverride}
                 onSkipPlan={m.skipPlan}
                 onRestorePlan={m.restorePlan}
+                onMovePlan={m.movePlan}
+                dailyCapacityMinutes={m.dailyPlanningCapacityMinutes}
               />
             )}
 
-            {m.tab === 'settings' && <SettingsPage />}
+            {m.tab === 'settings' && (
+              <SettingsPage
+                dailyCapacityMinutes={m.dailyPlanningCapacityMinutes}
+                onSetDailyCapacity={m.setDailyPlanningCapacity}
+              />
+            )}
           </main>
 
           <footer className="mt-10 border-t border-zinc-800 pt-4 text-xs leading-relaxed text-zinc-500">

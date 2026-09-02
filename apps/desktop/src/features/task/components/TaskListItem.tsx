@@ -36,10 +36,11 @@ interface TaskListItemProps {
   onSetPlanDuration?: (input: {
     taskId: string;
     date: string;
+    planId?: string;
     durationMinutes: number | null;
   }) => void;
   onSkipPlan?: (input: { taskId: string; date: string }) => void;
-  onRestorePlan?: (input: { taskId: string; date: string }) => void;
+  onRestorePlan?: (input: { taskId: string; date: string; planId?: string }) => void;
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onRestore?: (taskId: string) => void; // (role: restore handler, type: ((string)=>void) | undefined)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
@@ -93,6 +94,7 @@ export function TaskListItem(props: TaskListItemProps) {
   const scheduledToday = taskDayState?.scheduled ?? false;
   const doneToday = taskDayState?.completed ?? false;
   const skippedToday = taskDayState?.planStatus === 'skipped';
+  const movedToday = taskDayState?.planStatus === 'moved';
 
   // (role: safe description string, type: string)
   const description = (task.description ?? '').trim();
@@ -147,6 +149,7 @@ export function TaskListItem(props: TaskListItemProps) {
     onSetPlanDuration({
       taskId: task.id,
       date: todayYmd,
+      planId: taskDayState?.planId ?? undefined,
       durationMinutes: duration,
     });
   };
@@ -417,7 +420,13 @@ export function TaskListItem(props: TaskListItemProps) {
                 {planHasOverride && !skippedToday && onRestorePlan && (
                   <button
                     type="button"
-                    onClick={() => onRestorePlan({ taskId: task.id, date: todayYmd })}
+                    onClick={() =>
+                      onRestorePlan({
+                        taskId: task.id,
+                        date: todayYmd,
+                        planId: taskDayState?.planId ?? undefined,
+                      })
+                    }
                     className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
                     {tr('task.restoreRoutinePlan')}
                   </button>
@@ -425,12 +434,18 @@ export function TaskListItem(props: TaskListItemProps) {
                 {skippedToday && onRestorePlan && !open && (
                   <button
                     type="button"
-                    onClick={() => onRestorePlan({ taskId: task.id, date: todayYmd })}
+                    onClick={() =>
+                      onRestorePlan({
+                        taskId: task.id,
+                        date: todayYmd,
+                        planId: taskDayState?.planId ?? undefined,
+                      })
+                    }
                     className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-300/20">
                     {tr('task.restoreRoutinePlan')}
                   </button>
                 )}
-                {onSkipPlan && !skippedToday && !open && (
+                {onSkipPlan && !skippedToday && !movedToday && !open && (
                   <button
                     type="button"
                     onClick={() => onSkipPlan({ taskId: task.id, date: todayYmd })}

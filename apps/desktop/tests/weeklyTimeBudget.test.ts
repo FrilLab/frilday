@@ -113,6 +113,20 @@ describe('weekly time budget projection', () => {
     expect(totalPlannedMinutes(days)).toBe(0);
   });
 
+  test('uses the configured daily capacity for advisory overload feedback', () => {
+    const days = buildWeeklyTimeBudget({
+      tasks: [task],
+      scheduleSlots: [slot([plan({ plannedDurationMinutes: 61 })])],
+      weekDates,
+      completions: [],
+      dailyCapacityMinutes: 60,
+    });
+
+    expect(days[0]?.capacityMinutes).toBe(60);
+    expect(days[0]?.overloaded).toBe(true);
+    expect(days[1]?.overloaded).toBe(false);
+  });
+
   test('recognises both stable Plan completions and legacy task-date completions', () => {
     const current = plan({ plannedDurationMinutes: 60 });
     const legacy = plan({

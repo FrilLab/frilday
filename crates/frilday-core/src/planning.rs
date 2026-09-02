@@ -46,6 +46,26 @@ pub fn resolve_plan(
     })
 }
 
+/// Check whether a Routine would contribute a virtual Plan on a date.
+///
+/// The desktop adapter uses this alongside persisted Plan records when it
+/// validates a move destination. Keeping the recurrence and occurrence-limit
+/// rules here avoids duplicating schedule projection logic in the UI layer.
+pub fn has_virtual_plan_on_date(
+    target: RoutinePlanTarget<'_>,
+    completions: &[Completion],
+    date: LocalDate,
+) -> bool {
+    visible_dates_between(
+        target.routine,
+        date,
+        date,
+        target.created_local_date,
+        completions,
+    )
+    .contains(&date)
+}
+
 /// Resolve all Plans in an inclusive range without producing duplicates.
 /// Persisted records are included by their effective date so moved Plans are
 /// still visible at their destination, while skipped Plans remain attached to
@@ -136,7 +156,9 @@ struct PlanKey(crate::RoutineId, LocalDate);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PlanStatus, PlannedDuration, RoutineId, ScheduleRule, Timestamp};
+    use crate::{
+        PlanStatus, PlannedDuration, RoutineId, ScheduleRule, Session, SessionId, Timestamp,
+    };
 
     fn routine() -> Routine {
         Routine::new(
@@ -276,5 +298,58 @@ mod tests {
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].effective_date(), destination);
         assert_eq!(plans[0].date(), source);
+    }
+
+    #[test]
+    fn moving_onto_a_scheduled_date_keeps_one_effective_occurrence() {
+        let routine = routine();
+        let source = LocalDate::parse("2026-01-05").unwrap();
+        let destination = LocalDate::parse("2026-01-06").unwrap();
+        let mut moved = Plan::from_routine(&routine, source, source).unwrap();
+        moved.move_to(destination);
+        let targets = [RoutinePlanTarget {
+            routine: &routine,
+            created_local_date: source,
+        }];
+
+        let plans = resolve_plans(&targets, &[moved], &[], source, destination);
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].effective_date(), destination);
+    }
+
+    #[test]
+    fn naturally_scheduled_destination_is_reported_as_a_virtual_plan() {
+        let routine = routine();
+        let created = LocalDate::parse("2026-01-05").unwrap();
+        let destination = LocalDate::parse("2026-01-06").unwrap();
+        let unscheduled = LocalDate::parse("2026-01-10").unwrap();
+        let target = RoutinePlanTarget {
+            routine: &routine,
+            created_local_date: created,
+        };
+
+        assert!(has_virtual_plan_on_date(target, &[], destination));
+        assert!(!has_virtual_plan_on_date(target, &[], unscheduled));
+    }
+
+    #[test]
+    fn history_makes_a_plan_immutable_for_adjustments() {
+        let routine = routine();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let plan = Plan::from_routine(&routine, date, date).unwrap();
+        let completion =
+            Completion::for_routine_and_plan(routine.id().clone(), plan.id().clone(), date);
+        assert!(plan.has_history(&[completion], &[]));
+
+        let session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(routine.id().clone()),
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_225_600),
+        )
+        .unwrap();
+        assert!(plan.has_history(&[], &[session]));
     }
 }

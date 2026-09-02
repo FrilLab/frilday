@@ -23,7 +23,7 @@ pub use completion::{
 pub use date::{DateError, LocalDate, Weekday};
 pub use ids::{IdError, PlanId, RoutineId, SessionId};
 pub use plan::{Plan, PlanError, PlanStatus};
-pub use planning::{RoutinePlanTarget, resolve_plan, resolve_plans};
+pub use planning::{RoutinePlanTarget, has_virtual_plan_on_date, resolve_plan, resolve_plans};
 pub use routine::{Routine, RoutineError};
 pub use schedule::{
     CustomSchedule, ScheduleError, ScheduleRule, completed_dates_between, effective_start_on,

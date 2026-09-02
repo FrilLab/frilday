@@ -22,13 +22,22 @@ import { LocaleContext } from '../../i18n/context';
 type PlanMutation = (input: {
   taskId: string;
   date: string;
+  planId?: string;
   durationMinutes: number | null;
 }) => boolean | void;
 
 type PlanDateMutation = (input: {
   taskId: string;
   date: string;
+  planId?: string;
 }) => boolean | void;
+
+type PlanMoveMutation = (input: {
+  taskId: string;
+  planId: string;
+  fromDate: string;
+  destinationDate: string;
+}) => boolean | void | Promise<boolean | void>;
 
 function formatDuration(
   minutes: number,
@@ -63,12 +72,23 @@ function PlanAdjustment(props: {
   onSetPlanDuration?: PlanMutation;
   onSkipPlan?: PlanDateMutation;
   onRestorePlan?: PlanDateMutation;
+  onMovePlan?: PlanMoveMutation;
+  todayYmd: string;
 }) {
   const { t } = useContext(LocaleContext);
-  const { item, onClose, onSetPlanDuration, onSkipPlan, onRestorePlan } = props;
+  const {
+    item,
+    onClose,
+    onSetPlanDuration,
+    onSkipPlan,
+    onRestorePlan,
+    onMovePlan,
+    todayYmd,
+  } = props;
   const [draft, setDraft] = useState(
     String(item.plan.plannedDurationMinutes),
   );
+  const [moveDraft, setMoveDraft] = useState(item.dateYmd);
   const [validationError, setValidationError] = useState<string | null>(null);
   const isSkipped = item.plan.status === 'skipped';
   const isMoved = item.plan.status === 'moved';
@@ -91,6 +111,7 @@ function PlanAdjustment(props: {
         onSetPlanDuration({
           taskId: item.task.id,
           date: item.dateYmd,
+          planId: item.plan.id,
           durationMinutes,
         }),
       )
@@ -103,7 +124,11 @@ function PlanAdjustment(props: {
     if (
       onRestorePlan &&
       mutationSucceeded(
-        onRestorePlan({ taskId: item.task.id, date: item.dateYmd }),
+        onRestorePlan({
+          taskId: item.task.id,
+          date: item.dateYmd,
+          planId: item.plan.id,
+        }),
       )
     ) {
       onClose();
@@ -115,6 +140,20 @@ function PlanAdjustment(props: {
       onSkipPlan &&
       mutationSucceeded(onSkipPlan({ taskId: item.task.id, date: item.dateYmd }))
     ) {
+      onClose();
+    }
+  };
+
+  const move = async () => {
+    if (!onMovePlan || !moveDraft) return;
+    setValidationError(null);
+    const result = await onMovePlan({
+      taskId: item.task.id,
+      planId: item.plan.id,
+      fromDate: item.plan.date,
+      destinationDate: moveDraft,
+    });
+    if (mutationSucceeded(result)) {
       onClose();
     }
   };
@@ -139,9 +178,7 @@ function PlanAdjustment(props: {
         </button>
       </div>
 
-      {isMoved ? (
-        <p className="mt-3 text-xs text-zinc-400">{t('schedule.movedPlanHint')}</p>
-      ) : isSkipped ? (
+      {isSkipped ? (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-amber-200">{t('schedule.allSkipped')}</span>
           {onRestorePlan && (
@@ -155,6 +192,11 @@ function PlanAdjustment(props: {
         </div>
       ) : (
         <>
+          {isMoved && (
+            <p className="mt-3 text-xs text-sky-200/80">
+              {t('schedule.movedPlanHint')}
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
               {t('task.planned')}
@@ -201,7 +243,7 @@ function PlanAdjustment(props: {
                 {t('schedule.restoreRoutinePlan')}
               </button>
             )}
-            {onSkipPlan && (
+            {!isMoved && onSkipPlan && (
               <button
                 type="button"
                 onClick={skip}
@@ -210,6 +252,31 @@ function PlanAdjustment(props: {
               </button>
             )}
           </div>
+
+          {onMovePlan && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-zinc-800 pt-3">
+              <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
+                {t('schedule.moveTo')}
+                <input
+                  type="date"
+                  min={todayYmd}
+                  value={moveDraft}
+                  onChange={(event) => {
+                    setMoveDraft(event.target.value);
+                    setValidationError(null);
+                  }}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-sky-300/60"
+                  aria-label={t('schedule.moveTo')}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={move}
+                className="rounded-lg border border-sky-300/30 bg-sky-300/10 px-2.5 py-1.5 text-xs text-sky-100 hover:bg-sky-300/20">
+                {t('schedule.movePlan')}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -224,6 +291,7 @@ function WeeklyLoadOverview(props: {
   const peakDayMinutes = Math.max(0, ...days.map((day) => day.plannedMinutes));
   const maxDailyMinutes = Math.max(1, peakDayMinutes);
   const weekTotal = totalPlannedMinutes(days);
+  const dailyCapacityMinutes = days[0]?.capacityMinutes ?? 0;
   const activePlanCount = days.reduce(
     (total, day) =>
       total + day.plans.filter((item) => item.plan.executable).length,
@@ -262,6 +330,11 @@ function WeeklyLoadOverview(props: {
             })}
           </span>
         </div>
+        <p className="mt-1 text-[11px] text-zinc-600">
+          {t('schedule.capacity', {
+            duration: formatDuration(dailyCapacityMinutes, t),
+          })}
+        </p>
         <div className="mt-3 grid grid-cols-7 items-end gap-1.5 sm:gap-2">
           {days.map((day) => {
             const height =
@@ -304,6 +377,7 @@ function DayBudgetCard(props: {
   onSetPlanDuration?: PlanMutation;
   onSkipPlan?: PlanDateMutation;
   onRestorePlan?: PlanDateMutation;
+  onMovePlan?: PlanMoveMutation;
 }) {
   const {
     day,
@@ -313,6 +387,7 @@ function DayBudgetCard(props: {
     onSetPlanDuration,
     onSkipPlan,
     onRestorePlan,
+    onMovePlan,
   } = props;
   const [adjustingKey, setAdjustingKey] = useState<string | null>(null);
   const skippedCount = day.plans.filter((item) => !item.plan.executable).length;
@@ -352,7 +427,10 @@ function DayBudgetCard(props: {
 
       {day.overloaded && (
         <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 px-2 py-1.5 text-xs text-amber-100">
-          {t('schedule.highLoad')}
+          {t('schedule.highLoad', {
+            planned: formatDuration(day.plannedMinutes, t),
+            capacity: formatDuration(day.capacityMinutes, t),
+          })}
         </div>
       )}
 
@@ -451,9 +529,8 @@ function DayBudgetCard(props: {
                         {t('schedule.routine')}
                       </button>
                     )}
-                    {!isMoved &&
-                      canAdjustDate &&
-                      (onSetPlanDuration || onSkipPlan || onRestorePlan) && (
+                    {canAdjustDate &&
+                      (onSetPlanDuration || onSkipPlan || onRestorePlan || onMovePlan) && (
                         <button
                           type="button"
                           onClick={() =>
@@ -465,9 +542,8 @@ function DayBudgetCard(props: {
                           {t('schedule.adjustPlan')}
                         </button>
                       )}
-                    {!isMoved &&
-                      !canAdjustDate &&
-                      (onSetPlanDuration || onSkipPlan || onRestorePlan) && (
+                    {!canAdjustDate &&
+                      (onSetPlanDuration || onSkipPlan || onRestorePlan || onMovePlan) && (
                         <span className="rounded-lg border border-zinc-800 px-2 py-1 text-[11px] text-zinc-600">
                           {t('schedule.pastReadOnly')}
                         </span>
@@ -475,13 +551,15 @@ function DayBudgetCard(props: {
                   </div>
                 </div>
 
-                {isAdjusting && canAdjustDate && !isMoved && (
+                {isAdjusting && canAdjustDate && (
                   <PlanAdjustment
                     item={item}
+                    todayYmd={todayYmd}
                     onClose={() => setAdjustingKey(null)}
                     onSetPlanDuration={onSetPlanDuration}
                     onSkipPlan={onSkipPlan}
                     onRestorePlan={onRestorePlan}
+                    onMovePlan={onMovePlan}
                   />
                 )}
               </article>
@@ -504,6 +582,8 @@ export function SchedulePage(props: {
   onSetPlanDuration?: PlanMutation;
   onSkipPlan?: PlanDateMutation;
   onRestorePlan?: PlanDateMutation;
+  onMovePlan?: PlanMoveMutation;
+  dailyCapacityMinutes?: number;
 }) {
   const { t } = useContext(LocaleContext);
   const {
@@ -517,6 +597,8 @@ export function SchedulePage(props: {
     onSetPlanDuration,
     onSkipPlan,
     onRestorePlan,
+    onMovePlan,
+    dailyCapacityMinutes,
   } = props;
 
   const currentWeekStartYmd = useMemo(
@@ -535,7 +617,6 @@ export function SchedulePage(props: {
     () => normalizeWeekStart(displayWeekStartYmd),
     [displayWeekStartYmd],
   );
-  const canGoNext = normalizedWeekStartYmd < currentWeekStartYmd;
   const [scheduleSlots, setScheduleSlots] = useState<CoreScheduleSlot[]>([]);
 
   useEffect(() => {
@@ -574,8 +655,16 @@ export function SchedulePage(props: {
         weekDates,
         completions,
         getMemoText,
+        dailyCapacityMinutes,
       }),
-    [tasks, scheduleSlots, weekDates, completions, getMemoText],
+    [
+      tasks,
+      scheduleSlots,
+      weekDates,
+      completions,
+      getMemoText,
+      dailyCapacityMinutes,
+    ],
   );
   const weekEndYmd = weekDates[6] ?? normalizedWeekStartYmd;
 
@@ -610,14 +699,10 @@ export function SchedulePage(props: {
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (!canGoNext) return;
-                setDisplayWeekStartYmd((previous) =>
-                  shiftWeekStart(previous, 7),
-                );
-              }}
-              disabled={!canGoNext}
-              className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900/70 disabled:cursor-not-allowed disabled:opacity-50">
+              onClick={() =>
+                setDisplayWeekStartYmd((previous) => shiftWeekStart(previous, 7))
+              }
+              className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900/70">
               {t('schedule.nextWeek')}
             </button>
           </div>
@@ -645,6 +730,7 @@ export function SchedulePage(props: {
             onSetPlanDuration={onSetPlanDuration}
             onSkipPlan={onSkipPlan}
             onRestorePlan={onRestorePlan}
+            onMovePlan={onMovePlan}
           />
         ))}
       </div>

@@ -1,7 +1,13 @@
 import type { Completion, DayOfWeek, Task } from '../../shared/types';
 import { WEEK_ORDER } from './scheduleView';
 
-export const OVERLOADED_DAY_MINUTES = 8 * 60;
+export const DEFAULT_DAILY_CAPACITY_MINUTES = 8 * 60;
+export const MIN_DAILY_CAPACITY_MINUTES = 1;
+export const MAX_DAILY_CAPACITY_MINUTES = 24 * 60;
+
+// Kept as a compatibility alias for callers that used the original fixed
+// threshold before daily capacity became configurable.
+export const OVERLOADED_DAY_MINUTES = DEFAULT_DAILY_CAPACITY_MINUTES;
 
 export type WeeklyPlanProjection = {
   id: string;
@@ -36,6 +42,7 @@ export type WeeklyDayBudget = {
   plannedMinutes: number;
   skippedMinutes: number;
   completedCount: number;
+  capacityMinutes: number;
   overloaded: boolean;
 };
 
@@ -71,10 +78,17 @@ export function buildWeeklyTimeBudget(input: {
   weekDates: readonly string[];
   completions: Completion[];
   getMemoText?: (taskId: string, date: string) => string;
+  dailyCapacityMinutes?: number;
 }): WeeklyDayBudget[] {
   const slotsByTask = new Map(
     input.scheduleSlots.map((slot) => [slot.taskId, slot]),
   );
+  const dailyCapacityMinutes =
+    Number.isInteger(input.dailyCapacityMinutes) &&
+    input.dailyCapacityMinutes! >= MIN_DAILY_CAPACITY_MINUTES &&
+    input.dailyCapacityMinutes! <= MAX_DAILY_CAPACITY_MINUTES
+      ? input.dailyCapacityMinutes!
+      : DEFAULT_DAILY_CAPACITY_MINUTES;
 
   return input.weekDates.slice(0, 7).map((dateYmd, index) => {
     const day = WEEK_ORDER[index] ?? 'Sun';
@@ -131,7 +145,8 @@ export function buildWeeklyTimeBudget(input: {
       plannedMinutes,
       skippedMinutes,
       completedCount: plans.filter((item) => item.completed).length,
-      overloaded: plannedMinutes >= OVERLOADED_DAY_MINUTES,
+      capacityMinutes: dailyCapacityMinutes,
+      overloaded: plannedMinutes > dailyCapacityMinutes,
     };
   });
 }
