@@ -37,7 +37,8 @@ pub use session::{
 pub use stats::{
     CompletionTotals, DailyTotals, RoutineCategory, RoutineStatsTarget, TimeTotals,
     WeeklyCompletionStats, WeeklyTotals, actual_minutes_for_routine, aggregate_for_date,
-    aggregate_for_week, completion_stats_between, completion_stats_for_week,
+    aggregate_for_week, completion_stats_between, completion_stats_between_with_plans,
+    completion_stats_for_week, completion_stats_for_week_with_plans,
 };
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
 pub use timer::{
@@ -676,5 +677,51 @@ mod tests {
 
         assert_eq!(totals.scheduled_count(), 3);
         assert_eq!(totals.completed_count(), 1);
+    }
+
+    #[test]
+    fn skipped_plans_are_excluded_from_period_and_weekly_completion_stats() {
+        let routine = Routine::new(
+            RoutineId::new("routine-single-day").unwrap(),
+            "Focus",
+            "",
+            PlannedDuration::from_minutes(30).unwrap(),
+            ScheduleRule::custom([Weekday::Mon]).unwrap(),
+            Timestamp::from_unix_seconds(1_767_225_600),
+        )
+        .unwrap();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let mut skipped = Plan::from_routine(&routine, date, date).unwrap();
+        skipped.skip();
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: date,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let weekly = completion_stats_for_week_with_plans(&targets, &[skipped.clone()], &[], date);
+        assert_eq!(weekly.total().scheduled_count(), 0);
+        assert_eq!(weekly.total().completed_count(), 0);
+
+        let period = completion_stats_between_with_plans(&targets, &[skipped], &[], date, date);
+        assert_eq!(period.scheduled_count(), 0);
+        assert_eq!(period.completed_count(), 0);
+    }
+
+    #[test]
+    fn skipping_one_occurrence_does_not_remove_other_weekly_occurrences() {
+        let routine = routine();
+        let monday = LocalDate::parse("2026-01-05").unwrap();
+        let mut skipped = Plan::from_routine(&routine, monday, monday).unwrap();
+        skipped.skip();
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: monday,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let weekly = completion_stats_for_week_with_plans(&targets, &[skipped], &[], monday);
+        assert_eq!(weekly.total().scheduled_count(), 1);
+        assert_eq!(weekly.total().completed_count(), 0);
     }
 }

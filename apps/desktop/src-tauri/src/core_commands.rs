@@ -2,13 +2,12 @@ use std::collections::HashMap;
 
 use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
-    completion_count_for_routine, completion_stats_between, completion_stats_for_week,
-    eligible_dates_between, pause_session_for_routine, resume_session_for_routine,
-    running_routine_id, start_session, stop_session_for_routine,
-    target_reached_sessions_at_with_plans, toggle_routine_completion_for_plan,
-    visible_dates_between, Completion, LocalDate, Plan, PlanId, PlanStatus, PlannedDuration,
-    Routine, RoutineCategory, RoutineId, RoutinePlanTarget, RoutineStatsTarget, ScheduleRule,
-    Session, SessionId, Timestamp,
+    completion_count_for_routine, completion_stats_between_with_plans,
+    completion_stats_for_week_with_plans, eligible_dates_between, pause_session_for_routine,
+    resume_session_for_routine, running_routine_id, start_session, stop_session_for_routine,
+    target_reached_sessions_at_with_plans, toggle_routine_completion_for_plan, Completion,
+    LocalDate, Plan, PlanId, PlanStatus, PlannedDuration, Routine, RoutineCategory, RoutineId,
+    RoutinePlanTarget, RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -255,6 +254,8 @@ pub fn core_toggle_completion(
 pub struct StatisticsRequest {
     tasks: Vec<TaskInput>,
     completions: Vec<CompletionInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     week_start_ymd: String,
     today_ymd: String,
     month_start_ymd: String,
@@ -303,6 +304,11 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
         .iter()
         .map(completion_from_input)
         .collect::<Result<Vec<_>, _>>()?;
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
     let all_start = completions
         .iter()
         .map(Completion::date)
@@ -326,7 +332,12 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
         })
         .collect::<Result<Vec<_>, String>>()?;
     let target_refs = targets;
-    let weekly = completion_stats_for_week(&target_refs, &completions, week_start);
+    let weekly = completion_stats_for_week_with_plans(
+        &target_refs,
+        &persisted_plans,
+        &completions,
+        week_start,
+    );
     let week_end = week_start
         .checked_add_days(6)
         .map_err(|error| error.to_string())?;
@@ -340,21 +351,30 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
             daily_rate: weekly.daily().rate(),
             custom_rate: weekly.custom().rate(),
         },
-        week_range: rate_output(completion_stats_between(
+        week_range: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
             &completions,
             week_start,
             week_end,
         )),
-        today: rate_for_date(&target_refs, &completions, week_start, today),
-        month: rate_output(completion_stats_between(
+        today: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
+            &completions,
+            today,
+            today,
+        )),
+        month: rate_output(completion_stats_between_with_plans(
+            &target_refs,
+            &persisted_plans,
             &completions,
             month_start,
             today,
         )),
-        all_time: rate_output(completion_stats_between(
+        all_time: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
             &completions,
             all_start,
             today,
@@ -929,49 +949,6 @@ fn sessions_to_outputs(
             })
         })
         .collect()
-}
-
-fn rate_for_date(
-    targets: &[RoutineStatsTarget<'_>],
-    completions: &[Completion],
-    week_start: LocalDate,
-    date: LocalDate,
-) -> RateOutput {
-    let week_end = week_start.checked_add_days(6).expect("week is bounded");
-    let mut scheduled_count = 0;
-    let mut completed_count = 0;
-    for target in targets.iter().filter(|target| target.routine.is_active()) {
-        if !target.routine.schedule().matches(date.weekday()) {
-            continue;
-        }
-        if !visible_dates_between(
-            target.routine,
-            week_start,
-            week_end,
-            target.created_local_date,
-            completions,
-        )
-        .contains(&date)
-        {
-            continue;
-        }
-        scheduled_count += 1;
-        if completions
-            .iter()
-            .any(|completion| completion.matches_routine_on(target.routine.id(), date))
-        {
-            completed_count += 1;
-        }
-    }
-    RateOutput {
-        scheduled_count,
-        completed_count,
-        rate: if scheduled_count == 0 {
-            0.0
-        } else {
-            completed_count as f64 * 100.0 / scheduled_count as f64
-        },
-    }
 }
 
 fn rate_output(totals: frilday_core::CompletionTotals) -> RateOutput {

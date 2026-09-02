@@ -123,6 +123,17 @@ describe('desktop core adapter', () => {
     await getCoreStatistics({
       tasks: [task],
       completions: [],
+      plans: [
+        {
+          id: 'routine-plan:6:task-1:2026-01-05',
+          routineId: task.id,
+          date: '2026-01-05',
+          baselineDurationMinutes: 30,
+          durationOverrideMinutes: null,
+          status: 'planned',
+          movedToYmd: null,
+        },
+      ],
       weekStartYmd: '2026-01-05',
       todayYmd: '2026-01-05',
       monthStartYmd: '2026-01-01',
@@ -195,6 +206,12 @@ describe('desktop core adapter', () => {
       'core_pause_timer',
       'core_resume_timer',
       'core_target_reached',
+    ]);
+    expect(calls[1]?.request.plans).toEqual([
+      expect.objectContaining({
+        routineId: task.id,
+        date: '2026-01-05',
+      }),
     ]);
   });
 

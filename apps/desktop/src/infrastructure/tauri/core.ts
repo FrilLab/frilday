@@ -227,6 +227,7 @@ export async function toggleCompletionWithCore(input: {
 export async function getCoreStatistics(input: {
   tasks: Task[];
   completions: Completion[];
+  plans?: Plan[];
   weekStartYmd: string;
   todayYmd: string;
   monthStartYmd: string;
@@ -234,6 +235,7 @@ export async function getCoreStatistics(input: {
   return invokeCore<CoreStatistics>('core_statistics', {
     tasks: input.tasks.map(toCoreTask),
     completions: input.completions.map(toCoreCompletion),
+    plans: (input.plans ?? []).map(toCorePlan),
     weekStartYmd: input.weekStartYmd,
     todayYmd: input.todayYmd,
     monthStartYmd: input.monthStartYmd,

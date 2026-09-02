@@ -133,7 +133,9 @@ contracts and are now represented by Rust tests and Tauri adapter tests:
   state. Reaching the planned duration never finishes a running session, so
   overtime is retained until the user pauses or finishes it.
 - Weekly completion statistics count each active routine at most once when it
-  has any completion in the week. Period statistics count scheduled instances.
+  has any completion in the week. Period statistics count executable scheduled
+  Plan instances; skipped Plan exceptions are excluded from both period and
+  daily denominators.
   Planned and actual minute totals are aggregated separately.
 
 The explicit parity refinements from the stable domain model are that invalid

@@ -170,6 +170,7 @@ export function useAppModel() {
     void getCoreStatistics({
       tasks,
       completions,
+      plans,
       weekStartYmd,
       todayYmd,
       monthStartYmd: monthStartYmd(todayYmd),
@@ -185,7 +186,7 @@ export function useAppModel() {
     return () => {
       current = false;
     };
-  }, [hydrated, tasks, completions, weekStartYmd, todayYmd]);
+  }, [hydrated, tasks, completions, plans, weekStartYmd, todayYmd]);
 
   const visibleToday = useMemo(() => {
     const state = new Map<
