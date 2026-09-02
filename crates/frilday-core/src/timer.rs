@@ -73,6 +73,9 @@ pub fn target_reached_sessions_at(
             })
             .map(|candidate| candidate.actual_duration_at(now).minutes())
             .fold(0, u64::saturating_add);
+        if completed_minutes >= u64::from(routine.planned_duration().minutes()) {
+            continue;
+        }
         let running_minutes = session.actual_duration_at(now).minutes();
 
         if completed_minutes.saturating_add(running_minutes)

@@ -113,6 +113,12 @@ function sameTargetReached(
   });
 }
 
+function hasRunningTimeEntry(timeEntries: TimeEntry[], taskId: string): boolean {
+  return timeEntries.some(
+    (timeEntry) => timeEntry.taskId === taskId && timeEntry.endedAt == null,
+  );
+}
+
 function persistCollections(
   next: PersistedCollections,
   failureMessage: string,
@@ -278,6 +284,11 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   },
 
   archiveTask: (taskId) => {
+    if (hasRunningTimeEntry(get().timeEntries, taskId)) {
+      set({ errorMsg: 'Pause or finish the timer before archiving this task.' });
+      return;
+    }
+
     const nextTasks = get().tasks.map((t) =>
       t.id === taskId ? { ...t, isActive: false } : t,
     );
@@ -343,14 +354,16 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           date,
         });
         const toggledTask = get().tasks.find((task) => task.id === taskId);
+        const taskIsRunning = hasRunningTimeEntry(get().timeEntries, taskId);
+        const autoArchived = result.autoArchived && !taskIsRunning;
         const nextTasks =
-          result.autoArchived && toggledTask
+          autoArchived && toggledTask
             ? get().tasks.map((task) =>
                 task.id === taskId ? { ...task, isActive: false } : task,
               )
             : get().tasks;
 
-        if (result.autoArchived && toggledTask) {
+        if (autoArchived && toggledTask) {
           getNotifier().notify({
             level: 'info',
             message: `Auto-archived: ${toggledTask.title}`,

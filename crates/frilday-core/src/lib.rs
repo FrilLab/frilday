@@ -338,7 +338,7 @@ mod tests {
         .unwrap();
         let reached = target_reached_sessions_at(
             std::slice::from_ref(&session),
-            &[routine],
+            std::slice::from_ref(&routine),
             Timestamp::from_unix_seconds(1_767_603_600),
         )
         .unwrap();
@@ -352,6 +352,33 @@ mod tests {
                 .actual_duration_at(Timestamp::from_unix_seconds(1_767_603_600))
                 .minutes(),
             60
+        );
+
+        let previous = Session::new(
+            SessionId::new("session-previous").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+            Some(Timestamp::from_unix_seconds(1_767_601_800)),
+        )
+        .unwrap();
+        let resumed = Session::start(
+            SessionId::new("session-resumed").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_602_000),
+        )
+        .unwrap();
+        assert!(
+            target_reached_sessions_at(
+                &[previous, resumed],
+                std::slice::from_ref(&routine),
+                Timestamp::from_unix_seconds(1_767_602_000),
+            )
+            .unwrap()
+            .is_empty()
         );
     }
 

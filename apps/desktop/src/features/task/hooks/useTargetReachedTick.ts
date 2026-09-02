@@ -13,10 +13,15 @@ const TIMER_DONE_NOTIFY_KEY = 'settings.notifications.timerDone';
 // observes durable timestamps; it never changes session or completion state.
 export function useTargetReachedTick() {
   const { t } = useLocale();
+  const hasRunningSession = useFrilDayStore((state) =>
+    state.timeEntries.some((timeEntry) => timeEntry.endedAt == null),
+  );
   const notifiedSessionIds = useRef(new Set<string>());
   const inFlight = useRef(false);
 
   useEffect(() => {
+    if (!hasRunningSession) return;
+
     let active = true;
 
     const check = async () => {
@@ -72,5 +77,5 @@ export function useTargetReachedTick() {
       active = false;
       window.clearInterval(id);
     };
-  }, [t]);
+  }, [hasRunningSession, t]);
 }
