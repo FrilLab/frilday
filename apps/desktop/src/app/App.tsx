@@ -77,6 +77,7 @@ export default function App() {
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                openTimerTaskId={m.openTimerTaskId}
                 activeTimerTask={m.activeTimerTask}
                 activeTimerPhase={m.activeTimerPhase}
                 getMemoText={m.getMemoText}
@@ -120,6 +121,7 @@ export default function App() {
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                openTimerTaskId={m.openTimerTaskId}
                 taskDayStates={m.taskDayStates}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}

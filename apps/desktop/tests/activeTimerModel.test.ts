@@ -92,6 +92,9 @@ describe('tracked timer elapsed time', () => {
           date: '2026-01-05',
           startedAt: '2026-01-05T10:00:00.000Z',
           endedAt: '2026-01-05T10:05:30.000Z',
+          pausedAt: null,
+          activeStartedAt: null,
+          accumulatedMillis: 0,
           minutes: 5,
         },
         {
@@ -100,6 +103,9 @@ describe('tracked timer elapsed time', () => {
           date: '2026-01-05',
           startedAt: '2026-01-05T10:10:00.000Z',
           endedAt: null,
+          pausedAt: null,
+          activeStartedAt: '2026-01-05T10:10:00.000Z',
+          accumulatedMillis: 0,
           minutes: 0,
         },
       ],
@@ -109,5 +115,51 @@ describe('tracked timer elapsed time', () => {
     );
 
     expect(elapsed).toBe(7 * 60 + 45);
+  });
+
+  test('restores a paused session without counting the paused wall time', () => {
+    const elapsed = getTrackedElapsedSeconds(
+      [
+        {
+          id: 'paused',
+          taskId: 'task-1',
+          date: '2026-01-05',
+          startedAt: '2026-01-05T10:00:00.000Z',
+          endedAt: null,
+          pausedAt: '2026-01-05T10:10:00.000Z',
+          activeStartedAt: null,
+          accumulatedMillis: 10 * 60 * 1000,
+          minutes: 10,
+        },
+      ],
+      'task-1',
+      '2026-01-05T12:00:00.000Z',
+      '2026-01-05',
+    );
+
+    expect(elapsed).toBe(10 * 60);
+  });
+
+  test('uses the restored active segment after a resume', () => {
+    const elapsed = getTrackedElapsedSeconds(
+      [
+        {
+          id: 'resumed',
+          taskId: 'task-1',
+          date: '2026-01-05',
+          startedAt: '2026-01-05T10:00:00.000Z',
+          endedAt: null,
+          pausedAt: null,
+          activeStartedAt: '2026-01-05T11:00:00.000Z',
+          accumulatedMillis: 10 * 60 * 1000,
+          minutes: 10,
+        },
+      ],
+      'task-1',
+      '2026-01-05T11:05:00.000Z',
+      '2026-01-05',
+    );
+
+    expect(elapsed).toBe(15 * 60);
   });
 });

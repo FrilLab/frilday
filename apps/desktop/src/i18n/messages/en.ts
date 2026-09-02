@@ -138,6 +138,8 @@ export const en = {
     backToPlan: 'Back to plan',
     switchConfirm:
       'Switch from "{current}" to "{next}"? The current session will be stopped and the new plan will start.',
+    pausedSwitchBlocked:
+      'Resume or finish "{current}" before starting another session.',
   },
 
   today: {

@@ -64,7 +64,9 @@ export function useAppModel() {
     toggleToday,
     setDailyMemo,
     startTimer,
-    stopTimer,
+    pauseTimer,
+    resumeTimer,
+    finishTimer,
   } = useFrilDayStore();
 
   const [tab, setTab] = useState<Tab>('today');
@@ -103,9 +105,6 @@ export function useAppModel() {
   );
   const [activeTimerPhase, setActiveTimerPhase] =
     useState<ActiveTimerPhase>('ready');
-  const [pendingTimerTaskId, setPendingTimerTaskId] = useState<string | null>(
-    null,
-  );
   const pendingTimerStarts = useRef(new Set<string>());
   const [scheduleSlots, setScheduleSlots] = useState<
     Awaited<ReturnType<typeof getVisibleScheduleSlots>>
@@ -113,6 +112,12 @@ export function useAppModel() {
   const [statistics, setStatistics] = useState<CoreStatistics>(EMPTY_STATS);
   const [timeTotals, setTimeTotals] =
     useState<CoreTimeTotals>(EMPTY_TIME_TOTALS);
+
+  const openTimerEntry = useMemo(
+    () => timeEntries.find((entry) => entry.endedAt == null) ?? null,
+    [timeEntries],
+  );
+  const openTimerTaskId = openTimerEntry?.taskId ?? null;
 
   useEffect(() => {
     if (!hydrated) return;
@@ -196,9 +201,10 @@ export function useAppModel() {
     const filtered = tasks.filter((t) => {
       if (!t.isActive) return false;
 
-      const isRunning = runningTaskId === t.id;
-      // Keep an active timer visible after midnight so it can still be stopped.
-      if (isRunning) return true;
+      const isOpenTimer = openTimerTaskId === t.id;
+      // Keep a recovered running or paused timer visible after midnight so it
+      // remains controllable from the following local day.
+      if (isOpenTimer) return true;
       return visibleToday.get(t.id)?.visible ?? false;
     });
     return [...filtered].sort((a, b) => {
@@ -207,7 +213,7 @@ export function useAppModel() {
       if (aDone === bDone) return 0;
       return aDone ? 1 : -1;
     });
-  }, [tasks, runningTaskId, visibleToday]);
+  }, [tasks, openTimerTaskId, visibleToday]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -270,60 +276,36 @@ export function useAppModel() {
   }, [tasks, showArchived, manageCategory, manageQuery]);
 
   const activeTimerTask = useMemo(() => {
+    if (openTimerTaskId != null) {
+      const open = tasks.find((task) => task.id === openTimerTaskId);
+      if (open) return open;
+    }
+
     if (activeTimerTaskId != null) {
       const selected = tasks.find((task) => task.id === activeTimerTaskId);
       if (selected) return selected;
     }
 
-    if (runningTaskId != null) {
-      const running = tasks.find((task) => task.id === runningTaskId);
-      if (running) return running;
-    }
-
     return null;
-  }, [activeTimerTaskId, runningTaskId, tasks]);
+  }, [activeTimerTaskId, openTimerTaskId, tasks]);
 
-  // Adopt a session restored from storage so it remains visible after an
-  // automatic stop as a finished execution instead of disappearing abruptly.
+  // Adopt a running or paused session restored from storage so it remains
+  // visible and controllable instead of disappearing after app restart.
   useEffect(() => {
-    if (runningTaskId == null || activeTimerTaskId != null) return;
-    setActiveTimerTaskId(runningTaskId);
-    setActiveTimerPhase('running');
-  }, [activeTimerTaskId, runningTaskId]);
-
-  // Auto-stop ends the persisted session without going through the button
-  // handlers. Reflect that transition in the execution surface once the
-  // running-session lookup catches up.
-  useEffect(() => {
-    if (
-      !hydrated ||
-      activeTimerTaskId == null ||
-      activeTimerPhase !== 'running' ||
-      pendingTimerTaskId === activeTimerTaskId
-    ) {
-      return;
-    }
-
-    const hasRunningEntry = timeEntries.some(
-      (entry) => entry.taskId === activeTimerTaskId && entry.endedAt == null,
-    );
-    if (runningTaskId == null && !hasRunningEntry) {
-      setActiveTimerPhase('finished');
-    }
-  }, [
-    activeTimerPhase,
-    activeTimerTaskId,
-    hydrated,
-    pendingTimerTaskId,
-    runningTaskId,
-    timeEntries,
-  ]);
+    if (openTimerTaskId == null) return;
+    setActiveTimerTaskId(openTimerTaskId);
+    setActiveTimerPhase(openTimerEntry?.pausedAt != null ? 'paused' : 'running');
+  }, [openTimerEntry?.pausedAt, openTimerTaskId]);
 
   const activeTimerPhaseForView: ActiveTimerPhase =
     activeTimerTask == null
       ? 'ready'
       : runningTaskId === activeTimerTask.id
         ? 'running'
+        : openTimerTaskId === activeTimerTask.id
+          ? openTimerEntry?.pausedAt != null
+            ? 'paused'
+            : 'running'
         : activeTimerTaskId === activeTimerTask.id
           ? activeTimerPhase
           : 'ready';
@@ -397,13 +379,19 @@ export function useAppModel() {
     if (pendingTimerStarts.current.has(task.id)) return;
 
     const currentTask =
-      runningTaskId == null
-        ? activeTimerPhase === 'running'
+      openTimerTaskId != null
+        ? tasks.find((candidate) => candidate.id === openTimerTaskId) ?? null
+        : activeTimerPhase === 'running'
           ? activeTimerTask
-          : null
-        : tasks.find((candidate) => candidate.id === runningTaskId) ?? null;
+          : null;
 
     if (currentTask && currentTask.id !== task.id) {
+      if (openTimerEntry?.pausedAt != null) {
+        setError(
+          t('timer.pausedSwitchBlocked', { current: currentTask.title }),
+        );
+        return;
+      }
       const shouldSwitch = window.confirm(
         t('timer.switchConfirm', {
           current: currentTask.title,
@@ -413,12 +401,11 @@ export function useAppModel() {
       if (!shouldSwitch) return;
     }
 
-    const previousTaskId = activeTimerTask?.id ?? runningTaskId;
+    const previousTaskId = activeTimerTask?.id ?? openTimerTaskId ?? runningTaskId;
     const previousPhase = activeTimerPhaseForView;
     pendingTimerStarts.current.add(task.id);
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('running');
-    setPendingTimerTaskId(task.id);
     try {
       const result = await startTimer({ taskId: task.id, today: new Date() });
       if (!result.ok) {
@@ -435,9 +422,6 @@ export function useAppModel() {
       }
     } finally {
       pendingTimerStarts.current.delete(task.id);
-      setPendingTimerTaskId((pending) =>
-        pending === task.id ? null : pending,
-      );
     }
   };
 
@@ -446,11 +430,11 @@ export function useAppModel() {
   };
 
   const handleStopTimer = async (task: Task) => {
-    const previousTaskId = activeTimerTask?.id ?? runningTaskId;
+    const previousTaskId = activeTimerTask?.id ?? openTimerTaskId ?? runningTaskId;
     const previousPhase = activeTimerPhaseForView;
     setActiveTimerTaskId(task.id);
     setActiveTimerPhase('paused');
-    const result = await stopTimer({ taskId: task.id, today: new Date() });
+    const result = await pauseTimer({ taskId: task.id, today: new Date() });
     if (!result.ok) {
       setActiveTimerTaskId(previousTaskId ?? null);
       setActiveTimerPhase(previousTaskId == null ? 'ready' : previousPhase);
@@ -465,16 +449,31 @@ export function useAppModel() {
     }
   };
 
-  const handleResumeTimer = (task: Task) => {
-    void startTimerForTask(task, 'Timer resumed');
+  const handleResumeTimer = async (task: Task) => {
+    const previousTaskId = activeTimerTask?.id ?? openTimerTaskId ?? runningTaskId;
+    const previousPhase = activeTimerPhaseForView;
+    setActiveTimerTaskId(task.id);
+    setActiveTimerPhase('running');
+    const result = await resumeTimer({ taskId: task.id, today: new Date() });
+    if (!result.ok) {
+      setActiveTimerTaskId(previousTaskId ?? null);
+      setActiveTimerPhase(previousTaskId == null ? 'ready' : previousPhase);
+      return;
+    }
+    if (result.changed) {
+      notifier.notify({
+        level: 'info',
+        message: `Timer resumed`,
+      });
+    }
   };
 
   const handleFinishTimer = async (task: Task) => {
-    const hasRunningEntry = timeEntries.some(
+    const hasOpenEntry = timeEntries.some(
       (entry) => entry.taskId === task.id && entry.endedAt == null,
     );
-    if (runningTaskId === task.id || hasRunningEntry) {
-      const result = await stopTimer({ taskId: task.id, today: new Date() });
+    if (runningTaskId === task.id || hasOpenEntry) {
+      const result = await finishTimer({ taskId: task.id, today: new Date() });
       if (!result.ok) return;
     }
 
@@ -505,6 +504,7 @@ export function useAppModel() {
     todayDow,
     nowIso,
     runningTaskId,
+    openTimerTaskId,
     activeTimerTask,
     activeTimerPhase: activeTimerPhaseForView,
 

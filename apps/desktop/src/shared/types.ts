@@ -35,6 +35,9 @@ export interface TimeEntry {
   date: string; // (role: YYYY-MM-DD, type: string)
   startedAt: string; // (role: ISO timestamp, type: string)
   endedAt: string | null; // (role: ISO timestamp or null if running, type: string | null)
+  pausedAt: string | null; // (role: pause transition timestamp, type: string | null)
+  activeStartedAt: string | null; // (role: current active segment start, type: string | null)
+  accumulatedMillis: number; // (role: completed active segments, type: milliseconds)
   minutes: number; // (role: computed minutes, type: number)
 }
 

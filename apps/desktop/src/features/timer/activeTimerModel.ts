@@ -71,8 +71,9 @@ export function getActiveTimerViewModel(input: {
 }
 
 /**
- * Calculate tracked time from session timestamps. Running entries use the
- * supplied wall-clock timestamp and are never incremented by render count.
+ * Calculate tracked time from durable session state. Running entries use the
+ * supplied wall-clock timestamp and are never incremented by render count;
+ * paused time is excluded because a paused entry has no active segment.
  */
 export function getTrackedElapsedSeconds(
   entries: readonly TimeEntry[],
@@ -94,15 +95,40 @@ export function getTrackedElapsedSeconds(
     }
 
     const startedMillis = new Date(entry.startedAt).getTime();
-    const endedMillis =
-      entry.endedAt == null
-        ? nowMillis
-        : new Date(entry.endedAt).getTime();
-    if (!Number.isFinite(startedMillis) || !Number.isFinite(endedMillis)) {
+    if (!Number.isFinite(startedMillis)) {
       continue;
     }
 
-    elapsedMillis += Math.max(0, endedMillis - startedMillis);
+    const persistedMillis = Number(entry.accumulatedMillis);
+    const accumulatedMillis = Number.isFinite(persistedMillis)
+      ? Math.max(0, persistedMillis)
+      : 0;
+
+    if (entry.endedAt != null) {
+      const endedMillis = new Date(entry.endedAt).getTime();
+      if (!Number.isFinite(endedMillis)) continue;
+
+      // Entries written before durable lifecycle fields were introduced have
+      // zero accumulatedMillis. Recover their exact duration from timestamps.
+      elapsedMillis +=
+        accumulatedMillis > 0
+          ? accumulatedMillis
+          : Math.max(0, endedMillis - startedMillis);
+      continue;
+    }
+
+    if (entry.pausedAt != null) {
+      elapsedMillis += accumulatedMillis;
+      continue;
+    }
+
+    const activeStartedMillis = entry.activeStartedAt
+      ? new Date(entry.activeStartedAt).getTime()
+      : startedMillis;
+    if (!Number.isFinite(activeStartedMillis)) continue;
+    const currentMillis = Number.isFinite(nowMillis) ? nowMillis : activeStartedMillis;
+    elapsedMillis +=
+      accumulatedMillis + Math.max(0, currentMillis - activeStartedMillis);
   }
 
   return Math.floor(elapsedMillis / 1000);

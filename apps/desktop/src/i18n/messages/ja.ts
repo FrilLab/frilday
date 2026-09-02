@@ -138,6 +138,8 @@ export const ja = {
     backToPlan: '予定に戻る',
     switchConfirm:
       '「{current}」から「{next}」に切り替えますか？現在のセッションを停止して新しい予定を開始します。',
+    pausedSwitchBlocked:
+      '別のセッションを開始する前に、「{current}」を再開するか終了してください。',
   },
 
   today: {

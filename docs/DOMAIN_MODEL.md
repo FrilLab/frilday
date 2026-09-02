@@ -14,10 +14,12 @@ SQLite, PostgreSQL, and serialization libraries.
   routine's planned duration as its baseline, and can have a date-specific
   duration override. A Plan can be skipped or moved without changing the
   Routine.
-- **Session** is an interval of actual work. It stores a stable id, its
-  associations, the local tracking date, and start/end timestamps. Actual
-  minutes are derived from timestamps, so overtime remains visible and a
-  cached minutes value cannot become a second source of truth.
+- **Session** is an actual-work lifecycle. It stores a stable id, its
+  associations, the local tracking date, the first start/end timestamps, the
+  current active-segment start or pause timestamp, and accumulated active
+  milliseconds. Actual minutes are derived from that durable state, so paused
+  time is excluded, overtime remains visible, and a cached minutes value cannot
+  become a second source of truth.
 - **Completion** is an independent binary signal for a routine/date or
   plan/date. Tracking time does not imply completion, and completion does not
   imply that planned time was fully tracked.
@@ -35,9 +37,14 @@ SQLite, PostgreSQL, and serialization libraries.
 - The local tracking date of a Session is its start date. A session that runs
   over midnight remains attributable to the date on which it started, matching
   the current desktop record shape.
-- A running Session has `ended_at = None`. Ending before starting is rejected,
-  ending an already-ended Session is rejected, and a collection containing
-  more than one running Session is invalid.
+- A running Session has `ended_at = None` and `active_started_at != None`; a
+  paused Session has `ended_at = None` and `paused_at != None`. Pause/resume/
+  finish transitions reject backwards clock movement. Ending before starting,
+  ending an already-ended Session, and invalid persisted states are rejected;
+  a collection containing more than one running Session is invalid. The
+  desktop session policy permits only one open (running or paused) Session at
+  a time, so a paused Session must be resumed or finished before another one
+  starts.
 - Completion is separate from Session and is idempotently toggled by the
   routine/date key. Duplicate completion dates are counted once for limits.
 - Archiving changes only future schedule eligibility. Existing Plans,
@@ -69,7 +76,7 @@ or the `daily_check.db` filename.
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
 | derived scheduled Task/date slot | `Plan` when the adapter begins materializing date-specific plans |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
-| `TimeEntry.startedAt`, `endedAt` | `Session` timestamps |
+| `TimeEntry.startedAt`, `endedAt`, `pausedAt`, `activeStartedAt`, `accumulatedMillis` | `Session` lifecycle state |
 | `TimeEntry.minutes` | Recomputed from timestamps; retained only as a compatibility/cache field outside core |
 | `Completion.taskId`, `date` | `Completion::for_routine(RoutineId, LocalDate)` |
 | `TaskDailyMemo.taskId`, `date`, `text`, `updatedAt` | Adapter-owned daily memo record associated with a `Routine` and date |
@@ -94,13 +101,16 @@ contracts and are now represented by Rust tests and Tauri adapter tests:
 - Completion toggles operate on the routine/date key, preserve unrelated
   records, and do not imply tracked time. Reaching `autoArchiveAfter` archives
   an active routine after the completion is added.
-- Starting a timer keeps at most one running session: another routine's
-  running session is stopped at the new start instant, while starting the same
-  routine again is rejected. Stopping can find a session started on an earlier
+- Starting a timer keeps one open session: another routine's running session
+  is finished at the new start instant, while starting the same routine again
+  is rejected. A paused session must be resumed or finished before another
+  session starts. Pause/resume/finish can find a session started on an earlier
   local day, and overnight work remains attributed to its start date.
-- Session actual minutes are floored elapsed timestamp minutes and may exceed
-  the planned duration. The persisted `minutes` column remains a compatibility
-  field; core calculations derive actual time from timestamps.
+- Session actual minutes are floored from durable active milliseconds and may
+  exceed the planned duration. The persisted `minutes` column remains a
+  compatibility field; core calculations derive actual time from lifecycle
+  state. Reaching the planned duration never finishes a running session, so
+  overtime is retained until the user pauses or finishes it.
 - Weekly completion statistics count each active routine at most once when it
   has any completion in the week. Period statistics count scheduled instances.
   Planned and actual minute totals are aggregated separately.
