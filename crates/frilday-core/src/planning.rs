@@ -46,6 +46,26 @@ pub fn resolve_plan(
     })
 }
 
+/// Check whether a Routine would contribute a virtual Plan on a date.
+///
+/// The desktop adapter uses this alongside persisted Plan records when it
+/// validates a move destination. Keeping the recurrence and occurrence-limit
+/// rules here avoids duplicating schedule projection logic in the UI layer.
+pub fn has_virtual_plan_on_date(
+    target: RoutinePlanTarget<'_>,
+    completions: &[Completion],
+    date: LocalDate,
+) -> bool {
+    visible_dates_between(
+        target.routine,
+        date,
+        date,
+        target.created_local_date,
+        completions,
+    )
+    .contains(&date)
+}
+
 /// Resolve all Plans in an inclusive range without producing duplicates.
 /// Persisted records are included by their effective date so moved Plans are
 /// still visible at their destination, while skipped Plans remain attached to
@@ -296,6 +316,21 @@ mod tests {
 
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].effective_date(), destination);
+    }
+
+    #[test]
+    fn naturally_scheduled_destination_is_reported_as_a_virtual_plan() {
+        let routine = routine();
+        let created = LocalDate::parse("2026-01-05").unwrap();
+        let destination = LocalDate::parse("2026-01-06").unwrap();
+        let unscheduled = LocalDate::parse("2026-01-10").unwrap();
+        let target = RoutinePlanTarget {
+            routine: &routine,
+            created_local_date: created,
+        };
+
+        assert!(has_virtual_plan_on_date(target, &[], destination));
+        assert!(!has_virtual_plan_on_date(target, &[], unscheduled));
     }
 
     #[test]

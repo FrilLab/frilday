@@ -132,6 +132,15 @@ pub struct ScheduleSlotsOutput {
     plans: Vec<PlanOutput>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualPlanRequest {
+    tasks: Vec<TaskInput>,
+    completions: Vec<CompletionInput>,
+    task_id: String,
+    date_ymd: String,
+}
+
 #[tauri::command]
 pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlotsOutput>, String> {
     let start = parse_date(&request.week_start_ymd)?;
@@ -188,6 +197,31 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
             })
         })
         .collect()
+}
+
+#[tauri::command]
+pub fn core_virtual_plan_exists(request: VirtualPlanRequest) -> Result<bool, String> {
+    let task = request
+        .tasks
+        .iter()
+        .find(|task| task.id == request.task_id)
+        .ok_or_else(|| "task not found".to_owned())?;
+    let routine = routine_from_task(task)?;
+    let completions = request
+        .completions
+        .iter()
+        .map(completion_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let target = RoutinePlanTarget {
+        routine: &routine,
+        created_local_date: parse_date(&task.created_local_date)?,
+    };
+
+    Ok(frilday_core::has_virtual_plan_on_date(
+        target,
+        &completions,
+        parse_date(&request.date_ymd)?,
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize)]

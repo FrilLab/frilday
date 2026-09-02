@@ -37,7 +37,7 @@ type PlanMoveMutation = (input: {
   planId: string;
   fromDate: string;
   destinationDate: string;
-}) => boolean | void;
+}) => boolean | void | Promise<boolean | void>;
 
 function formatDuration(
   minutes: number,
@@ -144,19 +144,16 @@ function PlanAdjustment(props: {
     }
   };
 
-  const move = () => {
+  const move = async () => {
     if (!onMovePlan || !moveDraft) return;
     setValidationError(null);
-    if (
-      mutationSucceeded(
-        onMovePlan({
-          taskId: item.task.id,
-          planId: item.plan.id,
-          fromDate: item.plan.date,
-          destinationDate: moveDraft,
-        }),
-      )
-    ) {
+    const result = await onMovePlan({
+      taskId: item.task.id,
+      planId: item.plan.id,
+      fromDate: item.plan.date,
+      destinationDate: moveDraft,
+    });
+    if (mutationSucceeded(result)) {
       onClose();
     }
   };

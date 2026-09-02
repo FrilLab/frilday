@@ -32,6 +32,7 @@ import { upsertDailyMemo } from '../../domain/memo';
 import { createRoutinePlan, routinePlanId } from '../../domain/plan/plan';
 import {
   getTargetReachedWithCore,
+  hasVirtualPlanOnDateWithCore,
   pauseTimerWithCore,
   resumeTimerWithCore,
   startTimerWithCore,
@@ -103,7 +104,7 @@ interface FrilDayState {
     planId?: string;
     fromDate: string;
     destinationDate: string;
-  }) => boolean;
+  }) => Promise<boolean>;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   pauseTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
@@ -371,7 +372,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     return true;
   },
 
-  movePlan: ({ taskId, planId, fromDate, destinationDate }) => {
+  movePlan: async ({ taskId, planId, fromDate, destinationDate }) => {
     const task = get().tasks.find((candidate) => candidate.id === taskId);
     if (!task) {
       set({ errorMsg: 'Task not found.' });
@@ -381,11 +382,6 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       set({ errorMsg: 'Enter a valid calendar date.' });
       return false;
     }
-    if (fromDate === destinationDate) {
-      set({ errorMsg: 'Choose a different destination date.' });
-      return false;
-    }
-
     const sourceId = routinePlanId(taskId, fromDate);
     const current =
       (planId != null ? get().plans.find((plan) => plan.id === planId) : undefined) ??
@@ -420,6 +416,36 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       return false;
     }
 
+    if (fromDate === destinationDate) {
+      if (sourcePlan.status !== 'moved') {
+        set({ errorMsg: 'Choose a different destination date.' });
+        return false;
+      }
+
+      const restoredPlan = {
+        ...sourcePlan,
+        status: 'planned' as const,
+        movedToYmd: null,
+      };
+      if (restoredPlan.durationOverrideMinutes == null) {
+        set({
+          plans: get().plans.filter((plan) => plan.id !== sourcePlan.id),
+          errorMsg: '',
+        });
+        persist(() => deletePlan(sourcePlan.id), 'Failed to restore plan.');
+      } else {
+        set({
+          plans: [
+            restoredPlan,
+            ...get().plans.filter((plan) => plan.id !== sourcePlan.id),
+          ],
+          errorMsg: '',
+        });
+        persist(() => savePlan(restoredPlan), 'Failed to restore plan.');
+      }
+      return true;
+    }
+
     const conflicts = get().plans.some(
       (plan) =>
         plan.id !== sourcePlan.id &&
@@ -427,6 +453,28 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         (plan.date === destinationDate || plan.movedToYmd === destinationDate),
     );
     if (conflicts) {
+      set({
+        errorMsg: 'This routine already has a plan on the destination date.',
+      });
+      return false;
+    }
+
+    let hasVirtualDestination = false;
+    try {
+      hasVirtualDestination = await hasVirtualPlanOnDateWithCore({
+        tasks: get().tasks,
+        completions: get().completions,
+        taskId,
+        dateYmd: destinationDate,
+      });
+    } catch (error) {
+      set({
+        errorMsg: `Failed to validate the destination date. ${formatError(error)}`,
+      });
+      return false;
+    }
+
+    if (hasVirtualDestination) {
       set({
         errorMsg: 'This routine already has a plan on the destination date.',
       });
