@@ -61,7 +61,6 @@ export function useAppModel() {
     updateTaskMeta,
     archiveTask,
     restoreTask,
-    deleteTask,
     toggleToday,
     setDailyMemo,
     startTimer,
@@ -320,7 +319,8 @@ export function useAppModel() {
 
   // Handlers
   const handleCreate = (input: CreateTaskInput) => {
-    createTask(input);
+    const created = createTask(input);
+    if (!created) return;
     notifier.notify({
       level: 'success',
       message: `Task created: ${input.title}`,
@@ -331,14 +331,20 @@ export function useAppModel() {
     taskId: string;
     title: string;
     description: string;
+    category: Task['category'];
+    durationMinutes: number;
     startYmd: string | null;
-    autoArchiveAfter: number | null;
-  }) => {
-    updateTaskMeta(input);
+    completionLimit: number | null;
+    occurrenceLimit: number | null;
+    customDays: Task['daysOfWeek'][number][];
+  }): boolean => {
+    const updated = updateTaskMeta(input);
+    if (!updated) return false;
     notifier.notify({
       level: 'success',
       message: 'Task updated',
     });
+    return true;
   };
 
   const handleSaveDailyMemo = (input: {
@@ -362,14 +368,6 @@ export function useAppModel() {
     notifier.notify({
       level: 'success',
       message: `Task restored`,
-    });
-  };
-
-  const handleDelete = (taskId: string) => {
-    deleteTask(taskId);
-    notifier.notify({
-      level: 'success',
-      message: `Task deleted permanently`,
     });
   };
 
@@ -546,7 +544,6 @@ export function useAppModel() {
     getMemoText,
     archiveTask,
     handleRestore,
-    handleDelete,
     handleResetManage,
 
     // timer actions (UI용)

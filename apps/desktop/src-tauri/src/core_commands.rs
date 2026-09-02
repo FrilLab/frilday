@@ -19,8 +19,8 @@ pub struct TaskInput {
     days_of_week: Vec<String>,
     duration_minutes: u32,
     start_ymd: Option<String>,
-    auto_archive_after: Option<u32>,
-    repeat_count: Option<u32>,
+    completion_limit: Option<u32>,
+    occurrence_limit: Option<u32>,
     is_active: bool,
     created_at_millis: i64,
     created_local_date: String,
@@ -652,13 +652,13 @@ fn routine_from_task(task: &TaskInput) -> Result<Routine, String> {
     .map_err(|error| error.to_string())?;
     routine.set_starts_on(task.start_ymd.as_deref().map(parse_date).transpose()?);
     routine
-        .set_completion_limit(task.auto_archive_after)
+        .set_completion_limit(task.completion_limit)
         .map_err(|error| error.to_string())?;
     routine
-        // `autoArchiveAfter` was also used as the backlog limit by older
-        // desktop data when `repeatCount` was absent. Preserve that fallback
-        // at the adapter boundary while keeping the core concepts separate.
-        .set_occurrence_limit(task.repeat_count.or(task.auto_archive_after))
+        // `repeatCount` is the explicit lifetime occurrence cap. The old
+        // autoArchiveAfter fallback made a completion threshold silently
+        // limit future occurrences, so the two routine defaults stay separate.
+        .set_occurrence_limit(task.occurrence_limit)
         .map_err(|error| error.to_string())?;
     if !task.is_active {
         routine.archive();

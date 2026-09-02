@@ -11,16 +11,20 @@ export interface TaskBase {
   description: string; // (role: persistent text, type: string)
   category: Category; // (role: schedule rule, type: Category)
   daysOfWeek: readonly DayOfWeek[]; // (role: schedule days, type: readonly DayOfWeek[])
-  durationMinutes: number; // (role: planned duration, type: minutes)
+  durationMinutes: number; // (role: reusable default planned duration, type: minutes)
   startYmd?: string | null; // (role: first eligible date YYYY-MM-DD, type: string | null | undefined)
-  autoArchiveAfter?: number | null; // (role: threshold, type: number | null | undefined)
-  repeatCount?: number | null; // (role: weekly max occurrences, type: number | null | undefined)
+  completionLimit?: number | null; // (role: completion limit, type: number | null | undefined)
+  occurrenceLimit?: number | null; // (role: lifetime occurrence limit, type: number | null | undefined)
   isActive: boolean; // (role: archive flag, type: boolean)
   createdAt: string; // (role: ISO timestamp, type: string)
 }
 
 // (role: unified task type, type: alias)
 export type Task = TaskBase;
+
+// Routine is the product vocabulary. Task remains as a compatibility alias
+// until date-specific Plan records replace the legacy desktop shape.
+export type Routine = TaskBase;
 
 // (role: completion record, type: interface)
 export interface Completion {

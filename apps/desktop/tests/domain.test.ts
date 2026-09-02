@@ -86,8 +86,8 @@ const task = {
   daysOfWeek: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const,
   durationMinutes: 30,
   startYmd: null,
-  autoArchiveAfter: null,
-  repeatCount: null,
+  completionLimit: 3,
+  occurrenceLimit: 5,
   isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 };
@@ -108,6 +108,9 @@ describe('desktop core adapter', () => {
       (calls[0]?.request.tasks as Array<{ createdLocalDate: string }>)[0]
         ?.createdLocalDate,
     ).toBe('2026-01-01');
+    expect(
+      (calls[0]?.request.tasks as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({ completionLimit: 3, occurrenceLimit: 5 });
   });
 
   test('routes completion, statistics, time, and session operations through commands', async () => {

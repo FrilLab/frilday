@@ -1,11 +1,6 @@
 use std::fmt;
 
-use crate::{
-    Weekday,
-    completion::{Completion, completion_count_for_routine},
-    date::LocalDate,
-    routine::Routine,
-};
+use crate::{Weekday, completion::Completion, date::LocalDate, routine::Routine};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScheduleError {
@@ -125,8 +120,8 @@ pub fn eligible_dates_between(
 }
 
 /// Selects visible planned dates for a period, preserving completed history.
-/// `occurrence_limit` is a lifetime cap, matching the existing desktop
-/// `repeatCount` behavior; it is not a weekly recurrence count.
+/// `occurrence_limit` is a lifetime cap on eligible occurrences from the
+/// routine's effective start; it is not a weekly recurrence count.
 pub fn visible_dates_between(
     routine: &Routine,
     start: LocalDate,
@@ -151,19 +146,48 @@ pub fn visible_dates_between(
         return merge_dates(period_dates, cutoff, scheduled, completed_in_period);
     };
 
-    let completed_total = completion_count_for_routine(completions, routine.id());
-    let completed_total = u32::try_from(completed_total).unwrap_or(u32::MAX);
-    let remaining = limit.saturating_sub(completed_total);
+    // The requested period is only a projection of the recurring schedule.
+    // Count earlier eligible dates as already materialized so an incomplete
+    // occurrence still consumes one slot in the lifetime cap.
+    let prior_occurrences =
+        count_eligible_dates_before(routine, cutoff, start, created_local_date, limit);
+    let remaining = limit.saturating_sub(prior_occurrences);
     if remaining == 0 {
         return completed_in_period;
     }
 
-    let queued: Vec<_> = scheduled
-        .into_iter()
-        .filter(|date| !completed_in_period.contains(date))
-        .take(remaining as usize)
-        .collect();
+    let queued: Vec<_> = scheduled.into_iter().take(remaining as usize).collect();
     merge_dates(period_dates, cutoff, queued, completed_in_period)
+}
+
+fn count_eligible_dates_before(
+    routine: &Routine,
+    cutoff: LocalDate,
+    period_start: LocalDate,
+    created_local_date: LocalDate,
+    limit: u32,
+) -> u32 {
+    if period_start <= cutoff {
+        return 0;
+    }
+
+    let period_end = period_start
+        .checked_add_days(-1)
+        .expect("a period after the cutoff must have a previous date");
+    let mut current = cutoff;
+    let mut count: u32 = 0;
+    while current <= period_end {
+        if is_eligible_on(routine, current, created_local_date) {
+            count = count.saturating_add(1);
+            if count == limit {
+                return count;
+            }
+        }
+        current = current
+            .checked_add_days(1)
+            .expect("bounded date range should remain in LocalDate range");
+    }
+    count
 }
 
 /// Return completion dates for a routine inside an inclusive period without

@@ -3,7 +3,7 @@ use crate::{
     date::LocalDate,
     plan::Plan,
     routine::Routine,
-    schedule::is_eligible_on,
+    schedule::{is_eligible_on, visible_dates_between},
     session::Session,
     time::{ActualDuration, PlannedDuration, Timestamp},
 };
@@ -289,10 +289,17 @@ pub fn completion_stats_between(
     }
 
     let mut totals = CompletionTotals::default();
-    for date in date_range(start, end) {
-        for target in targets
-            .iter()
-            .filter(|target| is_eligible_on(target.routine, date, target.created_local_date))
+    for target in targets.iter().filter(|target| target.routine.is_active()) {
+        let visible_dates = visible_dates_between(
+            target.routine,
+            start,
+            end,
+            target.created_local_date,
+            completions,
+        );
+        for date in visible_dates
+            .into_iter()
+            .filter(|date| is_eligible_on(target.routine, *date, target.created_local_date))
         {
             totals.scheduled_count = totals.scheduled_count.saturating_add(1);
             if completions

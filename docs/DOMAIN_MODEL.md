@@ -49,15 +49,19 @@ SQLite, PostgreSQL, and serialization libraries.
   routine/date key. Duplicate completion dates are counted once for limits.
 - Archiving changes only future schedule eligibility. Existing Plans,
   Sessions, Completions, and memo records remain historical data.
+- The desktop Routine management surface edits reusable defaults as one unit:
+  title, description, planned duration, recurrence, start date, and finite
+  limits. It does not expose completion or timer controls as part of routine
+  maintenance, and it does not offer destructive history deletion.
 - A Routine start date cannot make it eligible before its creation-local date;
   `effective_start_on` applies that clamp when the adapter supplies the local
   creation date.
 - `repeatCount` is mapped to the core's `occurrence_limit`, a lifetime
-  occurrence cap, because that is the behavior of the current desktop
-  schedule-limit implementation. It is not treated as a weekly recurrence
-  count. For legacy records without `repeatCount`, the adapter retains the
-  existing `autoArchiveAfter` backlog-limit fallback while also mapping it to
-  `completion_limit`.
+  occurrence cap. It is not treated as a weekly recurrence count.
+  `autoArchiveAfter` is mapped only to `completion_limit`; it no longer
+  silently doubles as an occurrence cap. This intentionally retires the
+  confusing legacy fallback while preserving both persisted fields and all
+  existing completion history.
 
 ## Legacy data mapping
 
@@ -71,8 +75,8 @@ or the `daily_check.db` filename.
 | `Task.category` and `daysOfWeek` | `ScheduleRule` (`weekday`, `weekend`, `daily`, or `custom`) |
 | `Task.durationMinutes` | `Routine` `PlannedDuration` |
 | `Task.startYmd` | `Routine.starts_on`, clamped against the local creation date |
-| `Task.autoArchiveAfter` | `Routine.completion_limit` |
-| `Task.repeatCount` | `Routine.occurrence_limit` (with the legacy `autoArchiveAfter` fallback when absent) |
+| legacy `Task.autoArchiveAfter` | `Routine.completion_limit` (app field: `completionLimit`; user-facing label: auto-archive after completions) |
+| legacy `Task.repeatCount` | `Routine.occurrence_limit` (app field: `occurrenceLimit`; user-facing label: lifetime occurrence limit; not a weekly recurrence count) |
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
 | derived scheduled Task/date slot | `Plan` when the adapter begins materializing date-specific plans |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
@@ -96,8 +100,8 @@ contracts and are now represented by Rust tests and Tauri adapter tests:
   contains scheduled dates plus completed dates, even when a completed date no
   longer matches the current schedule.
 - `repeatCount` is a lifetime cap on planned occurrences. Completed dates are
-  retained inside the displayed period; when `repeatCount` is absent,
-  `autoArchiveAfter` remains the legacy backlog-cap fallback.
+  retained inside the displayed period. `autoArchiveAfter` is only the
+  completion threshold; it no longer silently doubles as an occurrence cap.
 - Completion toggles operate on the routine/date key, preserve unrelated
   records, and do not imply tracked time. Reaching `autoArchiveAfter` archives
   an active routine after the completion is added.

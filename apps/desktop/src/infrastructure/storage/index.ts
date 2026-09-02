@@ -36,6 +36,44 @@ type LegacyAppData = {
   hasData: boolean;
 };
 
+function migrateLegacyTaskRecord(value: unknown): unknown {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const hasCanonicalLimits =
+    'completionLimit' in record || 'occurrenceLimit' in record;
+  if (hasCanonicalLimits) return value;
+
+  // `autoArchiveAfter` and `repeatCount` were ambiguous names in the v2
+  // localStorage shape. Keep the storage key stable, but migrate records at
+  // the boundary to the explicit Routine meanings used by the app.
+  return {
+    ...record,
+    completionLimit: record.autoArchiveAfter ?? null,
+    occurrenceLimit: record.repeatCount ?? null,
+  };
+}
+
+function parseLegacyTasks(): LegacyCollection<Task[]> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.tasks);
+    if (raw == null) return { value: [], valid: true };
+
+    const parsed = JSON.parse(raw) as unknown;
+    const migrated = Array.isArray(parsed)
+      ? parsed.map(migrateLegacyTaskRecord)
+      : parsed;
+    const result = TasksSchema.safeParse(migrated);
+    return result.success
+      ? { value: result.data as Task[], valid: true }
+      : { value: [], valid: false };
+  } catch {
+    return { value: [], valid: false };
+  }
+}
+
 function parseLegacyJson<T>(
   key: string,
   schema: {
@@ -61,7 +99,7 @@ function parseLegacyJson<T>(
 }
 
 function loadLegacyAppData(): LegacyAppData {
-  const tasks = parseLegacyJson(STORAGE_KEYS.tasks, TasksSchema, [] as Task[]);
+  const tasks = parseLegacyTasks();
   const completions = parseLegacyJson(
     STORAGE_KEYS.completions,
     CompletionsSchema,

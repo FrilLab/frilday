@@ -35,7 +35,6 @@ interface TaskListItemProps {
   onToggleToday: (task: Task) => void; // (role: toggle today's completion, type: (Task)=>void)
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onRestore?: (taskId: string) => void; // (role: restore handler, type: ((string)=>void) | undefined)
-  onDelete?: (taskId: string) => void; // (role: hard delete handler, type: ((string)=>void) | undefined)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
   onFinishTimer?: (task: Task) => void; // (role: finish timer, type: ((Task)=>void) | undefined)
@@ -44,9 +43,13 @@ interface TaskListItemProps {
     taskId: string;
     title: string;
     description: string;
+    category: Task['category'];
+    durationMinutes: number;
     startYmd: string | null;
-    autoArchiveAfter: number | null;
-  }) => void; // (role: update task fields, type: ((input)=>void) | undefined)
+    completionLimit: number | null;
+    occurrenceLimit: number | null;
+    customDays: DayOfWeek[];
+  }) => boolean; // (role: update routine defaults, type: ((input)=>boolean) | undefined)
   onError: (msg: string) => void; // (role: set error message, type: (string)=>void)
   taskDayState?: TaskDayState;
   targetReached?: boolean; // (role: planned target reached, type: boolean | undefined)
@@ -66,7 +69,6 @@ export function TaskListItem(props: TaskListItemProps) {
     onToggleToday,
     onArchive,
     onRestore,
-    onDelete,
     onStartTimer,
     onStopTimer,
     onFinishTimer,
@@ -89,9 +91,9 @@ export function TaskListItem(props: TaskListItemProps) {
 
   // (role: auto-archive progress "done/threshold", type: string | null)
   const autoArchiveProgressLabel =
-    task.autoArchiveAfter == null
+    task.completionLimit == null
       ? null
-      : `(${Math.min(doneCountTotal, task.autoArchiveAfter)}/${task.autoArchiveAfter})`;
+      : `(${Math.min(doneCountTotal, task.completionLimit)}/${task.completionLimit})`;
 
   // Store policy: only ONE open entry is active at a time.
   const running = runningTaskId === task.id;
@@ -136,23 +138,37 @@ export function TaskListItem(props: TaskListItemProps) {
   const [editDescription, setEditDescription] = useState(
     task.description ?? '',
   );
-  const [editAutoArchiveAfter, setEditAutoArchiveAfter] = useState(
-    task.autoArchiveAfter == null ? '' : String(task.autoArchiveAfter),
+  const [editCategory, setEditCategory] = useState(task.category);
+  const [editCustomDays, setEditCustomDays] = useState<DayOfWeek[]>([
+    ...task.daysOfWeek,
+  ]);
+  const [editDuration, setEditDuration] = useState(
+    String(task.durationMinutes),
+  );
+  const [editCompletionLimit, setEditCompletionLimit] = useState(
+    task.completionLimit == null ? '' : String(task.completionLimit),
+  );
+  const [editOccurrenceLimit, setEditOccurrenceLimit] = useState(
+    task.occurrenceLimit == null ? '' : String(task.occurrenceLimit),
   );
   const [editStartYmd, setEditStartYmd] = useState(task.startYmd ?? '');
-  const [editStartYmdError, setEditStartYmdError] = useState<string | null>(
-    null,
-  );
+  const [editError, setEditError] = useState<string | null>(null);
 
   // (role: open edit panel and initialize drafts, type: ()=>void)
   const openEdit = () => {
     setEditTitle(task.title);
     setEditDescription(task.description ?? '');
-    setEditAutoArchiveAfter(
-      task.autoArchiveAfter == null ? '' : String(task.autoArchiveAfter),
+    setEditCategory(task.category);
+    setEditCustomDays([...task.daysOfWeek]);
+    setEditDuration(String(task.durationMinutes));
+    setEditCompletionLimit(
+      task.completionLimit == null ? '' : String(task.completionLimit),
+    );
+    setEditOccurrenceLimit(
+      task.occurrenceLimit == null ? '' : String(task.occurrenceLimit),
     );
     setEditStartYmd(task.startYmd ?? '');
-    setEditStartYmdError(null);
+    setEditError(null);
     setEditOpen(true);
   };
 
@@ -171,33 +187,61 @@ export function TaskListItem(props: TaskListItemProps) {
   const saveTaskMeta = () => {
     if (!onUpdateTaskMeta) return;
 
-    const normalized = editAutoArchiveAfter.trim();
-    const threshold = normalized === '' ? null : Number(normalized);
-
-    if (threshold != null && (!Number.isInteger(threshold) || threshold < 1)) {
-      onError(tr('task.autoArchiveAfterHint'));
+    const duration = Number(editDuration.trim());
+    if (!Number.isInteger(duration) || duration < 1 || duration > 720) {
+      setEditError(tr('task.validation.durationInvalid'));
       return;
     }
 
-    const createdAtYmd = task.createdAt.slice(0, 10);
+    const normalizedCompletionLimit = editCompletionLimit.trim();
+    const completionLimit =
+      normalizedCompletionLimit === ''
+        ? null
+        : Number(normalizedCompletionLimit);
+    if (
+      completionLimit != null &&
+      (!Number.isInteger(completionLimit) || completionLimit < 1)
+    ) {
+      setEditError(tr('task.validation.positiveLimit'));
+      return;
+    }
+
+    const normalizedOccurrenceLimit = editOccurrenceLimit.trim();
+    const occurrenceLimit =
+      normalizedOccurrenceLimit === '' ? null : Number(normalizedOccurrenceLimit);
+    if (
+      occurrenceLimit != null &&
+      (!Number.isInteger(occurrenceLimit) || occurrenceLimit < 1)
+    ) {
+      setEditError(tr('task.validation.positiveLimit'));
+      return;
+    }
+
     const normalizedStartYmd =
       editStartYmd.trim() === '' ? null : editStartYmd.trim();
-    if (normalizedStartYmd && normalizedStartYmd < createdAtYmd) {
-      setEditStartYmdError(tr('task.validation.startDateBeforeCreatedAt'));
+    if (editCategory === 'custom' && editCustomDays.length === 0) {
+      setEditError(tr('task.validation.pickOneDay'));
       return;
     }
 
-    setEditStartYmdError(null);
-    onUpdateTaskMeta({
+    const saved = onUpdateTaskMeta({
       taskId: task.id,
       title: editTitle,
-      description: editDescription, // always string
+      description: editDescription,
+      category: editCategory,
+      durationMinutes: duration,
       startYmd: normalizedStartYmd,
-      autoArchiveAfter: threshold,
+      completionLimit,
+      occurrenceLimit,
+      customDays: editCustomDays,
     });
+    if (saved) closeEdit();
+  };
 
-    // UX: 저장 후 닫고 싶으면 이 줄을 켜도 됨.
-    // closeEdit();
+  const toggleEditDay = (day: DayOfWeek) => {
+    setEditCustomDays((days) =>
+      days.includes(day) ? days.filter((item) => item !== day) : [...days, day],
+    );
   };
 
   return (
@@ -221,13 +265,19 @@ export function TaskListItem(props: TaskListItemProps) {
 
             {variant === 'manage' && (
               <span className="rounded-full border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-xs text-zinc-300">
-                {categoryLabel}
+                {tr('task.recurrence')}: {categoryLabel}
               </span>
             )}
 
             {!task.isActive && (
               <span className="rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-xs text-zinc-300">
                 {tr('common.archived')}
+              </span>
+            )}
+
+            {variant === 'manage' && task.isActive && (
+              <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-200">
+                {tr('common.active')}
               </span>
             )}
           </div>
@@ -244,7 +294,7 @@ export function TaskListItem(props: TaskListItemProps) {
             )}
             {variant === 'manage' ? (
               <>
-                {tr('task.plan')}: {task.durationMinutes}
+                {tr('task.defaultDuration')}: {task.durationMinutes}
                 {tr('time.minuteShort')}
               </>
             ) : (
@@ -255,9 +305,14 @@ export function TaskListItem(props: TaskListItemProps) {
                 {tr('time.minuteShort')}
               </>
             )}
-            {task.autoArchiveAfter != null && (
+            {task.completionLimit != null && (
               <span className="ml-2 text-zinc-400">
                 · {tr('task.autoArchiveAfter')}: {autoArchiveProgressLabel}
+              </span>
+            )}
+            {variant === 'manage' && task.occurrenceLimit != null && (
+              <span className="ml-2 text-zinc-400">
+                · {tr('task.repeatCount')}: {task.occurrenceLimit}
               </span>
             )}
             {open && (
@@ -369,40 +424,42 @@ export function TaskListItem(props: TaskListItemProps) {
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              if (!scheduledToday) {
-                onError(tr('note.taskNotScheduledToday'));
-                return;
-              }
-              onToggleToday(task);
-            }}
-            aria-label={tr(
-              doneToday ? 'task.markIncomplete' : 'task.markComplete',
-              { task: task.title },
-            )}
-            aria-pressed={doneToday}
-            disabled={!scheduledToday}
-            className={[
-              'inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition',
-              doneToday
-                ? 'border-zinc-700 bg-zinc-800/40 text-zinc-400'
-                : 'border-zinc-800 bg-zinc-900/40 text-zinc-200 hover:bg-zinc-900/70',
-              'disabled:cursor-not-allowed disabled:opacity-60',
-            ].join(' ')}>
-            <span
+          {variant === 'today' && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!scheduledToday) {
+                  onError(tr('note.taskNotScheduledToday'));
+                  return;
+                }
+                onToggleToday(task);
+              }}
+              aria-label={tr(
+                doneToday ? 'task.markIncomplete' : 'task.markComplete',
+                { task: task.title },
+              )}
+              aria-pressed={doneToday}
+              disabled={!scheduledToday}
               className={[
-                'flex items-center justify-center h-4 w-4 rounded border transition',
+                'inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition',
                 doneToday
-                  ? 'border-zinc-500 bg-zinc-600'
-                  : 'border-zinc-600 bg-transparent',
-              ].join(' ')}
-              aria-hidden="true">
-              {doneToday && <Check size={12} className="text-white" />}
-            </span>
-            {tr('stats.done')}
-          </button>
+                  ? 'border-zinc-700 bg-zinc-800/40 text-zinc-400'
+                  : 'border-zinc-800 bg-zinc-900/40 text-zinc-200 hover:bg-zinc-900/70',
+                'disabled:cursor-not-allowed disabled:opacity-60',
+              ].join(' ')}>
+              <span
+                className={[
+                  'flex items-center justify-center h-4 w-4 rounded border transition',
+                  doneToday
+                    ? 'border-zinc-500 bg-zinc-600'
+                    : 'border-zinc-600 bg-transparent',
+                ].join(' ')}
+                aria-hidden="true">
+                {doneToday && <Check size={12} className="text-white" />}
+              </span>
+              {tr('stats.done')}
+            </button>
+          )}
 
           {variant === 'today' && (
             <button
@@ -434,28 +491,12 @@ export function TaskListItem(props: TaskListItemProps) {
               )}
 
               {!task.isActive && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onRestore?.(task.id)}
-                    className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900/70">
-                    {tr('task.restore')}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!onDelete) return;
-                      const ok = window.confirm(
-                        tr('note.deleteConfirm', { title: task.title }),
-                      );
-                      if (!ok) return;
-                      onDelete(task.id);
-                    }}
-                    className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-200 hover:bg-red-400/15">
-                    {tr('task.delete')}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => onRestore?.(task.id)}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900/70">
+                  {tr('task.restore')}
+                </button>
               )}
             </>
           )}
@@ -488,15 +529,38 @@ export function TaskListItem(props: TaskListItemProps) {
 
       {variant === 'manage' && editOpen && (
         <div className="mt-3 space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
-              {tr('task.title')}
-            </label>
-            <input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400"
-            />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {tr('task.title')}
+              </label>
+              <input
+                value={editTitle}
+                onChange={(e) => {
+                  setEditTitle(e.target.value);
+                  setEditError(null);
+                }}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {tr('task.defaultDuration')}
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={720}
+                step={1}
+                value={editDuration}
+                onChange={(e) => {
+                  setEditDuration(e.target.value);
+                  setEditError(null);
+                }}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400"
+              />
+            </div>
           </div>
 
           <div>
@@ -505,51 +569,134 @@ export function TaskListItem(props: TaskListItemProps) {
             </label>
             <textarea
               value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              rows={4}
-              placeholder={tr('task.descriptionPlaceholder')}
-              className="min-h-24 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-400">
-              {tr('task.startDate')}
-            </label>
-            <input
-              type="date"
-              value={editStartYmd}
               onChange={(e) => {
-                setEditStartYmd(e.target.value);
-                setEditStartYmdError(null);
+                setEditDescription(e.target.value);
+                setEditError(null);
               }}
-              className="w-44 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400"
+              rows={3}
+              placeholder={tr('task.descriptionPlaceholder')}
+              className="min-h-20 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
             />
-            <p className="mt-1 text-xs text-zinc-500">
-              {tr('task.startDateHint')}
-            </p>
-            {editStartYmdError && (
-              <p className="mt-1 text-xs text-amber-200">{editStartYmdError}</p>
-            )}
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-400">
-              {tr('task.autoArchiveAfter')}
+              {tr('task.recurrence')}
             </label>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={editAutoArchiveAfter}
-              onChange={(e) => setEditAutoArchiveAfter(e.target.value)}
-              placeholder="2"
-              className="w-32 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
-            />
-            <p className="mt-1 text-xs text-zinc-500">
-              {tr('task.autoArchiveAfterHint')}
-            </p>
+            <select
+              value={editCategory}
+              onChange={(e) => {
+                setEditCategory(e.target.value as Task['category']);
+                setEditError(null);
+              }}
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400">
+              <option value="weekday">{tr('task.addScheduleWeekday')}</option>
+              <option value="weekend">{tr('task.addScheduleWeekend')}</option>
+              <option value="daily">{tr('task.addScheduleDaily')}</option>
+              <option value="custom">{tr('task.addScheduleCustom')}</option>
+            </select>
           </div>
+
+          {editCategory === 'custom' && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="mb-2 text-xs font-medium text-zinc-400">
+                {tr('task.pickDays')}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const).map(
+                  (day) => {
+                    const selected = editCustomDays.includes(day);
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => {
+                          toggleEditDay(day);
+                          setEditError(null);
+                        }}
+                        aria-pressed={selected}
+                        className={[
+                          'rounded-full border px-3 py-1.5 text-sm transition',
+                          selected
+                            ? 'border-zinc-200 bg-zinc-100 text-zinc-900'
+                            : 'border-zinc-800 bg-zinc-900/40 text-zinc-200 hover:bg-zinc-900/70',
+                        ].join(' ')}>
+                        {tr(`time.day.${day}`)}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {tr('task.startDate')}
+              </label>
+              <input
+                type="date"
+                value={editStartYmd}
+                onChange={(e) => {
+                  setEditStartYmd(e.target.value);
+                  setEditError(null);
+                }}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-400"
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                {tr('task.startDateHint')}
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {tr('task.autoArchiveAfter')}
+              </label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={editCompletionLimit}
+                onChange={(e) => {
+                  setEditCompletionLimit(e.target.value);
+                  setEditError(null);
+                }}
+                placeholder={tr('task.unlimited')}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                {tr('task.autoArchiveAfterHint')}
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {tr('task.repeatCount')}
+              </label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={editOccurrenceLimit}
+                onChange={(e) => {
+                  setEditOccurrenceLimit(e.target.value);
+                  setEditError(null);
+                }}
+                placeholder={tr('task.unlimited')}
+                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-400"
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                {tr('task.repeatCountHint')}
+              </p>
+            </div>
+          </div>
+
+          {editError && (
+            <p className="text-xs text-amber-200" role="alert">
+              {editError}
+            </p>
+          )}
 
           <div className="flex justify-end">
             <button

@@ -8,7 +8,6 @@ import type {
   TimeEntry,
 } from '../../shared/types';
 import {
-  deleteTask as deletePersistedTask,
   loadAppData,
   saveTask,
   saveTaskDailyMemo,
@@ -21,7 +20,10 @@ import {
   createSerialQueue,
   type AsyncOperation,
 } from '../../shared/utils/serialQueue';
-import { createTaskEntity } from '../../domain/task/taskFactory';
+import {
+  createTaskEntity,
+  updateTaskEntity,
+} from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import {
@@ -63,21 +65,25 @@ interface FrilDayState {
     category: Category;
     durationMinutes: number;
     startYmd?: string | null;
-    autoArchiveAfter?: number | null;
+    completionLimit?: number | null;
+    occurrenceLimit?: number | null;
     customDays?: DayOfWeek[];
-  }) => void;
+  }) => boolean;
 
   updateTaskMeta: (input: {
     taskId: string;
     title: string;
     description: string;
+    category: Category;
+    durationMinutes: number;
     startYmd?: string | null;
-    autoArchiveAfter?: number | null;
-  }) => void;
+    completionLimit?: number | null;
+    occurrenceLimit?: number | null;
+    customDays?: DayOfWeek[];
+  }) => boolean;
 
   archiveTask: (taskId: string) => void;
   restoreTask: (taskId: string) => void;
-  deleteTask: (taskId: string) => void;
   toggleToday: (input: { taskId: string; today: Date }) => Promise<void>;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
@@ -204,35 +210,21 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     category,
     durationMinutes,
     startYmd,
-    autoArchiveAfter,
+    completionLimit,
+    occurrenceLimit,
     customDays,
   }) => {
-    const t = title.trim();
-    if (!t) {
-      set({ errorMsg: 'Title is required.' });
-      return;
-    }
-
-    const createdAtYmd = toYmd(new Date());
-    const normalizedStartYmd =
-      startYmd == null || String(startYmd).trim() === ''
-        ? null
-        : String(startYmd).trim();
-    if (normalizedStartYmd && normalizedStartYmd < createdAtYmd) {
-      set({ errorMsg: 'Start date cannot be earlier than created date.' });
-      return;
-    }
-
     try {
       const task = createTaskEntity({
         id: uid(),
-        title: t,
+        title,
         description,
         category,
         customDays,
         durationMinutes,
-        startYmd: normalizedStartYmd,
-        autoArchiveAfter,
+        startYmd,
+        completionLimit,
+        occurrenceLimit,
         nowIso: new Date().toISOString(),
       });
 
@@ -240,10 +232,12 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
 
       set({ tasks: nextTasks, errorMsg: '' });
       persist(() => saveTask(task), 'Failed to save task.');
+      return true;
     } catch (e) {
       set({
         errorMsg: e instanceof Error ? e.message : 'Failed to create task.',
       });
+      return false;
     }
   },
 
@@ -251,59 +245,43 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     taskId,
     title,
     description,
+    category,
+    durationMinutes,
     startYmd,
-    autoArchiveAfter,
+    completionLimit,
+    occurrenceLimit,
+    customDays,
   }) => {
-    const normalizedTitle = title.trim();
-    if (!normalizedTitle) {
-      set({ errorMsg: 'Title is required.' });
-      return;
-    }
-
-    const numericThreshold =
-      autoArchiveAfter == null ? null : Number(autoArchiveAfter);
-    const normalizedThreshold =
-      numericThreshold == null ||
-      !Number.isInteger(numericThreshold) ||
-      numericThreshold < 1
-        ? null
-        : numericThreshold;
-
-    const normalizedStartYmdRaw =
-      startYmd == null ? null : String(startYmd).trim();
-    const normalizedStartYmd =
-      normalizedStartYmdRaw == null || normalizedStartYmdRaw === ''
-        ? null
-        : /^\d{4}-\d{2}-\d{2}$/.test(normalizedStartYmdRaw)
-          ? normalizedStartYmdRaw
-          : null;
     const targetTask = get().tasks.find((task) => task.id === taskId);
     if (!targetTask) {
       set({ errorMsg: 'Task not found.' });
-      return;
+      return false;
     }
 
-    const createdAtYmd = targetTask.createdAt.slice(0, 10);
-    if (normalizedStartYmd && normalizedStartYmd < createdAtYmd) {
-      set({ errorMsg: 'Start date cannot be earlier than created date.' });
-      return;
+    try {
+      const nextTask = updateTaskEntity(targetTask, {
+        title,
+        description,
+        category,
+        customDays,
+        durationMinutes,
+        startYmd,
+        completionLimit,
+        occurrenceLimit,
+      });
+      const nextTasks = get().tasks.map((task) =>
+        task.id === taskId ? nextTask : task,
+      );
+
+      set({ tasks: nextTasks, errorMsg: '' });
+      persist(() => saveTask(nextTask), 'Failed to update task.');
+      return true;
+    } catch (error) {
+      set({
+        errorMsg: error instanceof Error ? error.message : 'Failed to update task.',
+      });
+      return false;
     }
-
-    const nextTasks = get().tasks.map((task) =>
-      task.id === taskId
-        ? {
-            ...task,
-            title: normalizedTitle,
-            description: description.trim(),
-            startYmd: normalizedStartYmd,
-            autoArchiveAfter: normalizedThreshold,
-          }
-        : task,
-    );
-    const nextTask = nextTasks.find((task) => task.id === taskId);
-
-    set({ tasks: nextTasks, errorMsg: '' });
-    if (nextTask) persist(() => saveTask(nextTask), 'Failed to update task.');
   },
 
   archiveTask: (taskId) => {
@@ -333,26 +311,6 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       () => setTaskActive(taskId, true),
       'Failed to restore task.',
     );
-  },
-
-  deleteTask: (taskId) => {
-    const nextTasks = get().tasks.filter((t) => t.id !== taskId);
-    const nextCompletions = get().completions.filter(
-      (c) => c.taskId !== taskId,
-    );
-    const nextTimeEntries = get().timeEntries.filter(
-      (e) => e.taskId !== taskId,
-    );
-    const nextMemos = get().taskDailyMemos.filter((m) => m.taskId !== taskId);
-
-    set({
-      tasks: nextTasks,
-      completions: nextCompletions,
-      timeEntries: nextTimeEntries,
-      taskDailyMemos: nextMemos,
-      errorMsg: '',
-    });
-    persist(() => deletePersistedTask(taskId), 'Failed to delete task.');
   },
 
   toggleToday: ({ taskId, today }) =>

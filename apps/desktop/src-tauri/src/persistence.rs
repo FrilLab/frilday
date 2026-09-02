@@ -17,8 +17,10 @@ pub struct TaskRecord {
     pub days_of_week: Vec<String>,
     pub duration_minutes: u32,
     pub start_ymd: Option<String>,
-    pub auto_archive_after: Option<u32>,
-    pub repeat_count: Option<u32>,
+    // The SQLite columns keep their legacy names for on-disk compatibility;
+    // the adapter exposes the explicit routine meanings to React.
+    pub completion_limit: Option<u32>,
+    pub occurrence_limit: Option<u32>,
     pub is_active: bool,
     pub created_at: String,
 }
@@ -323,12 +325,12 @@ fn task_from_row(row: TaskRow) -> Result<TaskRecord, String> {
         duration_minutes: u32::try_from(row.duration_minutes)
             .map_err(|_| "Task duration is outside the supported range".to_owned())?,
         start_ymd: row.start_ymd,
-        auto_archive_after: row
+        completion_limit: row
             .auto_archive_after
             .map(u32::try_from)
             .transpose()
             .map_err(|_| "Task archive threshold is invalid".to_owned())?,
-        repeat_count: row
+        occurrence_limit: row
             .repeat_count
             .map(u32::try_from)
             .transpose()
@@ -463,8 +465,8 @@ async fn insert_task(
     .bind(days_of_week)
     .bind(i64::from(task.duration_minutes))
     .bind(&task.start_ymd)
-    .bind(task.auto_archive_after.map(i64::from))
-    .bind(task.repeat_count.map(i64::from))
+    .bind(task.completion_limit.map(i64::from))
+    .bind(task.occurrence_limit.map(i64::from))
     .bind(if task.is_active { 1_i64 } else { 0_i64 })
     .bind(&task.created_at)
     .execute(&mut **executor)
@@ -493,8 +495,8 @@ async fn insert_task_if_absent(
     .bind(days_of_week)
     .bind(i64::from(task.duration_minutes))
     .bind(&task.start_ymd)
-    .bind(task.auto_archive_after.map(i64::from))
-    .bind(task.repeat_count.map(i64::from))
+    .bind(task.completion_limit.map(i64::from))
+    .bind(task.occurrence_limit.map(i64::from))
     .bind(if task.is_active { 1_i64 } else { 0_i64 })
     .bind(&task.created_at)
     .execute(&mut **executor)
@@ -868,8 +870,8 @@ mod tests {
                 days_of_week: vec!["Mon".to_owned(), "Wed".to_owned()],
                 duration_minutes: 30,
                 start_ymd: None,
-                auto_archive_after: None,
-                repeat_count: None,
+                completion_limit: None,
+                occurrence_limit: None,
                 is_active: true,
                 created_at: "2026-01-01T00:00:00.000Z".to_owned(),
             }],
@@ -915,8 +917,8 @@ mod tests {
                     ],
                     duration_minutes: 45,
                     start_ymd: Some("2026-01-05".to_owned()),
-                    auto_archive_after: Some(3),
-                    repeat_count: Some(5),
+                    completion_limit: Some(3),
+                    occurrence_limit: Some(5),
                     is_active: true,
                     created_at: "2026-01-01T08:00:00.000Z".to_owned(),
                 },
@@ -928,8 +930,8 @@ mod tests {
                     days_of_week: vec!["Sat".to_owned(), "Sun".to_owned()],
                     duration_minutes: 20,
                     start_ymd: None,
-                    auto_archive_after: Some(2),
-                    repeat_count: None,
+                    completion_limit: Some(2),
+                    occurrence_limit: None,
                     is_active: false,
                     created_at: "2025-12-01T08:00:00.000Z".to_owned(),
                 },
@@ -941,8 +943,8 @@ mod tests {
                     days_of_week: vec!["Tue".to_owned(), "Thu".to_owned()],
                     duration_minutes: 60,
                     start_ymd: Some("2026-01-06".to_owned()),
-                    auto_archive_after: Some(4),
-                    repeat_count: None,
+                    completion_limit: Some(4),
+                    occurrence_limit: None,
                     is_active: true,
                     created_at: "2026-01-02T08:00:00.000Z".to_owned(),
                 },
@@ -1125,6 +1127,32 @@ mod tests {
     }
 
     #[test]
+    fn updating_routine_defaults_does_not_touch_historical_records() {
+        tauri::async_runtime::block_on(async {
+            let pool = test_pool().await;
+            let data = sample_data();
+            import_app_data(&pool, &data).await.unwrap();
+
+            let mut updated_task = data.tasks[0].clone();
+            updated_task.title = "Updated routine".to_owned();
+            updated_task.duration_minutes = 60;
+            updated_task.category = "daily".to_owned();
+            updated_task.days_of_week = vec!["Mon".to_owned()];
+            updated_task.is_active = false;
+
+            let mut transaction = pool.begin().await.unwrap();
+            insert_task(&mut transaction, &updated_task).await.unwrap();
+            transaction.commit().await.unwrap();
+
+            let loaded = load_app_data_from_pool(&pool).await.unwrap();
+            assert_eq!(loaded.tasks[0], updated_task);
+            assert_eq!(loaded.completions, data.completions);
+            assert_eq!(loaded.time_entries, data.time_entries);
+            assert_eq!(loaded.task_daily_memos, data.task_daily_memos);
+        });
+    }
+
+    #[test]
     fn imports_representative_legacy_history_without_resetting_the_database() {
         tauri::async_runtime::block_on(async {
             let pool = test_pool().await;
@@ -1178,8 +1206,8 @@ mod tests {
                 days_of_week: vec!["Mon".to_owned()],
                 duration_minutes: 10,
                 start_ymd: None,
-                auto_archive_after: None,
-                repeat_count: None,
+                completion_limit: None,
+                occurrence_limit: None,
                 is_active: true,
                 created_at: "2026-01-01T00:00:00.000Z".to_owned(),
             };

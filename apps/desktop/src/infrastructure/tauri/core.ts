@@ -9,8 +9,8 @@ type CoreTaskInput = {
   daysOfWeek: readonly Task['daysOfWeek'][number][];
   durationMinutes: number;
   startYmd: string | null;
-  autoArchiveAfter: number | null;
-  repeatCount: number | null;
+  completionLimit: number | null;
+  occurrenceLimit: number | null;
   isActive: boolean;
   createdAtMillis: number;
   createdLocalDate: string;
@@ -103,8 +103,8 @@ function toCoreTask(task: Task): CoreTaskInput {
     daysOfWeek: [...task.daysOfWeek],
     durationMinutes: task.durationMinutes,
     startYmd: task.startYmd ?? null,
-    autoArchiveAfter: task.autoArchiveAfter ?? null,
-    repeatCount: task.repeatCount ?? null,
+    completionLimit: task.completionLimit ?? null,
+    occurrenceLimit: task.occurrenceLimit ?? null,
     isActive: task.isActive,
     createdAtMillis,
     // Date conversion is deliberately at the desktop/local-time boundary.

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type PersistedAppData = {
-  tasks: typeof validLegacyTask[];
+  tasks: typeof validRoutine[];
   completions: Array<{ taskId: string; date: string }>;
   timeEntries: Array<{
     id: string;
@@ -42,7 +42,7 @@ mock.module('@tauri-apps/api/core', () => ({
     command: string,
     payload?: {
       data?: PersistedAppData;
-      task?: (typeof validLegacyTask) & { id: string };
+      task?: (typeof validRoutine) & { id: string };
     },
   ) => {
     switch (command) {
@@ -113,8 +113,22 @@ const validLegacyTask = {
   daysOfWeek: ['Mon'] as const,
   durationMinutes: 30,
   startYmd: null,
-  autoArchiveAfter: null,
-  repeatCount: null,
+  autoArchiveAfter: 2,
+  repeatCount: 4,
+  isActive: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+const validRoutine = {
+  id: 'task-legacy',
+  title: 'Migrated task',
+  description: '',
+  category: 'weekday' as const,
+  daysOfWeek: ['Mon'] as const,
+  durationMinutes: 30,
+  startYmd: null,
+  completionLimit: 2,
+  occurrenceLimit: 4,
   isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 };
@@ -141,11 +155,11 @@ describe('typed desktop persistence adapter', () => {
 
     const data = await loadAppData();
 
-    expect(data.tasks).toEqual([validLegacyTask]);
+    expect(data.tasks).toEqual([validRoutine]);
     expect(storageValues.has('dailycheck.tasks.v2')).toBe(false);
     expect(importCalls).toBe(1);
     expect(migrationMarker).toBe(true);
-    expect(databaseData.tasks).toEqual([validLegacyTask]);
+    expect(databaseData.tasks).toEqual([validRoutine]);
   });
 
   test('leaves corrupted legacy input untouched for recovery', async () => {
@@ -158,7 +172,7 @@ describe('typed desktop persistence adapter', () => {
   });
 
   test('does not replace existing database data with legacy data', async () => {
-    databaseData.tasks = [validLegacyTask];
+    databaseData.tasks = [validRoutine];
     storageValues.set(
       'dailycheck.tasks.v2',
       JSON.stringify([{ ...validLegacyTask, id: 'legacy-task' }]),
@@ -166,15 +180,28 @@ describe('typed desktop persistence adapter', () => {
 
     const data = await loadAppData();
 
-    expect(data.tasks).toEqual([validLegacyTask]);
+    expect(data.tasks).toEqual([validRoutine]);
     expect(storageValues.has('dailycheck.tasks.v2')).toBe(false);
     expect(importCalls).toBe(1);
   });
 
   test('uses a typed task command for normal writes', async () => {
-    await saveTask(validLegacyTask);
+    await saveTask(validRoutine);
 
     expect(saveTaskCalls).toBe(1);
-    expect(databaseData.tasks).toEqual([validLegacyTask]);
+    expect(databaseData.tasks).toEqual([validRoutine]);
+  });
+
+  test('loads older routines with long text without losing persisted data', async () => {
+    const legacyTextRoutine = {
+      ...validRoutine,
+      title: 'x'.repeat(81),
+      description: 'y'.repeat(2001),
+    };
+    databaseData.tasks = [legacyTextRoutine];
+
+    const data = await loadAppData();
+
+    expect(data.tasks).toEqual([legacyTextRoutine]);
   });
 });

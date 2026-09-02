@@ -87,7 +87,62 @@ mod tests {
                 created,
                 &completions,
             ),
-            vec![monday, monday.checked_add_days(1).unwrap()]
+            vec![monday]
+        );
+    }
+
+    #[test]
+    fn occurrence_limit_is_consumed_by_incomplete_prior_occurrences() {
+        let mut routine = routine();
+        routine.set_occurrence_limit(Some(3)).unwrap();
+        let first_week = LocalDate::parse("2026-01-05").unwrap();
+        let second_week = LocalDate::parse("2026-01-12").unwrap();
+
+        assert_eq!(
+            visible_dates_between(
+                &routine,
+                first_week,
+                first_week.checked_add_days(6).unwrap(),
+                first_week,
+                &[],
+            ),
+            vec![
+                first_week,
+                first_week.checked_add_days(1).unwrap(),
+                first_week.checked_add_days(2).unwrap()
+            ]
+        );
+        assert!(
+            visible_dates_between(
+                &routine,
+                second_week,
+                second_week.checked_add_days(6).unwrap(),
+                first_week,
+                &[],
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn completion_limit_does_not_silently_limit_future_occurrences() {
+        let mut routine = routine();
+        routine.set_completion_limit(Some(2)).unwrap();
+        let start = LocalDate::parse("2026-01-05").unwrap();
+
+        assert_eq!(
+            visible_dates_between(
+                &routine,
+                start,
+                start.checked_add_days(2).unwrap(),
+                LocalDate::parse("2026-01-01").unwrap(),
+                &[],
+            ),
+            vec![
+                start,
+                start.checked_add_days(1).unwrap(),
+                start.checked_add_days(2).unwrap()
+            ]
         );
     }
 
@@ -542,5 +597,24 @@ mod tests {
             completion_stats_between(&targets, &completions, monday, monday).rate(),
             100.0
         );
+    }
+
+    #[test]
+    fn period_statistics_respect_lifetime_occurrence_limits() {
+        let mut routine = routine();
+        routine.set_occurrence_limit(Some(3)).unwrap();
+        let start = LocalDate::parse("2026-01-05").unwrap();
+        let end = start.checked_add_days(13).unwrap();
+        let completions = vec![Completion::for_routine(routine.id().clone(), start)];
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: start,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let totals = completion_stats_between(&targets, &completions, start, end);
+
+        assert_eq!(totals.scheduled_count(), 3);
+        assert_eq!(totals.completed_count(), 1);
     }
 }
