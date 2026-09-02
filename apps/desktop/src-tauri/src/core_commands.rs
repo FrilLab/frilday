@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use frilday_core::{
-    actual_minutes_for_routine, aggregate_for_date, auto_stop_sessions_at_target,
-    completed_dates_between, completion_count_for_routine, completion_stats_between,
-    completion_stats_for_week, eligible_dates_between, running_routine_id, start_session,
-    stop_session_for_routine, toggle_routine_completion, visible_dates_between, Completion,
+    actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
+    completion_count_for_routine, completion_stats_between, completion_stats_for_week,
+    eligible_dates_between, running_routine_id, start_session, stop_session_for_routine,
+    target_reached_sessions_at, toggle_routine_completion, visible_dates_between, Completion,
     LocalDate, Plan, PlanId, PlannedDuration, Routine, RoutineCategory, RoutineId,
     RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
 };
@@ -489,76 +489,56 @@ pub fn core_stop_timer(request: StopTimerRequest) -> Result<TimerOutput, String>
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoStopRequest {
+pub struct TargetReachedRequest {
     tasks: Vec<TaskInput>,
-    completions: Vec<CompletionInput>,
     time_entries: Vec<TimeEntryInput>,
-    now_iso: String,
     now_millis: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FinishedTaskOutput {
+pub struct TargetReachedTaskOutput {
+    session_id: String,
     task_id: String,
     title: String,
-    minutes: u64,
-    auto_completed: bool,
+    actual_minutes: u64,
+    planned_minutes: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoStopOutput {
-    time_entries: Vec<TimeEntryOutput>,
-    completions: Vec<CompletionOutput>,
-    finished_tasks: Vec<FinishedTaskOutput>,
+pub struct TargetReachedOutput {
+    tasks: Vec<TargetReachedTaskOutput>,
 }
 
 #[tauri::command]
-pub fn core_auto_stop(request: AutoStopRequest) -> Result<AutoStopOutput, String> {
+pub fn core_target_reached(request: TargetReachedRequest) -> Result<TargetReachedOutput, String> {
     let sessions = request
         .time_entries
         .iter()
         .map(session_from_input)
-        .collect::<Result<Vec<_>, _>>()?;
-    let completions = request
-        .completions
-        .iter()
-        .map(completion_from_input)
         .collect::<Result<Vec<_>, _>>()?;
     let routines = request
         .tasks
         .iter()
         .map(routine_from_task)
         .collect::<Result<Vec<_>, _>>()?;
-    let result = auto_stop_sessions_at_target(
+    let reached = target_reached_sessions_at(
         &sessions,
         &routines,
-        &completions,
         Timestamp::from_unix_millis(request.now_millis),
     )
     .map_err(|error| error.to_string())?;
 
-    Ok(AutoStopOutput {
-        time_entries: sessions_to_outputs(
-            result.sessions(),
-            &request.time_entries,
-            &request.now_iso,
-            request.now_millis,
-        ),
-        completions: result
-            .completions()
+    Ok(TargetReachedOutput {
+        tasks: reached
             .iter()
-            .filter_map(completion_to_output)
-            .collect(),
-        finished_tasks: result
-            .finished()
-            .iter()
-            .map(|finished| FinishedTaskOutput {
-                task_id: finished.routine_id().to_string(),
-                title: finished.title().to_owned(),
-                minutes: finished.minutes(),
-                auto_completed: finished.auto_completed(),
+            .map(|target| TargetReachedTaskOutput {
+                session_id: target.session_id().to_string(),
+                task_id: target.routine_id().to_string(),
+                title: target.title().to_owned(),
+                actual_minutes: target.actual_minutes(),
+                planned_minutes: target.planned_minutes(),
             })
             .collect(),
     })

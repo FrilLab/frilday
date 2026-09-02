@@ -37,7 +37,7 @@ pub use stats::{
     aggregate_for_week, completion_stats_between, completion_stats_for_week,
 };
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
-pub use timer::{AutoStopResult, FinishedSession, auto_stop_sessions_at_target};
+pub use timer::{TargetReachedSession, target_reached_sessions_at};
 
 #[cfg(test)]
 mod tests {
@@ -325,9 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn auto_stop_keeps_overtime_and_adds_a_completion_once() {
-        let mut routine = routine();
-        routine.set_occurrence_limit(Some(2)).unwrap();
+    fn target_reached_is_read_only_and_preserves_overtime() {
+        let routine = routine();
         let date = LocalDate::parse("2026-01-05").unwrap();
         let session = Session::start(
             SessionId::new("session-1").unwrap(),
@@ -337,18 +336,21 @@ mod tests {
             Timestamp::from_unix_seconds(1_767_600_000),
         )
         .unwrap();
-        let result = auto_stop_sessions_at_target(
-            &[session],
-            &[routine.clone()],
-            &[],
+        let reached = target_reached_sessions_at(
+            std::slice::from_ref(&session),
+            &[routine],
             Timestamp::from_unix_seconds(1_767_603_600),
         )
         .unwrap();
 
-        assert_eq!(result.finished()[0].minutes(), 60);
-        assert_eq!(result.completions().len(), 1);
+        assert_eq!(reached.len(), 1);
+        assert_eq!(reached[0].actual_minutes(), 60);
+        assert_eq!(reached[0].planned_minutes(), 30);
+        assert!(session.is_running());
         assert_eq!(
-            result.sessions()[0].actual_duration().unwrap().minutes(),
+            session
+                .actual_duration_at(Timestamp::from_unix_seconds(1_767_603_600))
+                .minutes(),
             60
         );
     }

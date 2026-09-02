@@ -67,6 +67,9 @@ export const ko = {
     archive: '보관',
     restore: '복원',
     delete: '삭제',
+    markComplete: '"{task}" 완료 처리',
+    markIncomplete: '"{task}" 완료 취소',
+    toggleMemoForTask: '"{task}" 메모 열기/닫기',
     todayTasks: '오늘의 작업',
     noTasks: '작업이 없습니다.',
     noTasksScheduledToday: '오늘 예정된 작업이 없습니다.',
@@ -93,6 +96,15 @@ export const ko = {
     basedOnTodayPlannedMinutes: '오늘 계획된 시간(분) 기준입니다.',
     start: '시작',
     stop: '중지',
+    pause: '일시정지',
+    resume: '재개',
+    finish: '종료',
+    targetReached: '계획한 시간이 끝났습니다.',
+    overtimeTracking: '초과 시간이 계속 기록되고 있습니다.',
+    startTimerForTask: '"{task}" 타이머 시작',
+    resumeTimerForTask: '"{task}" 타이머 재개',
+    pauseTimerForTask: '"{task}" 타이머 일시정지',
+    finishTimerForTask: '"{task}" 타이머 종료',
     hourShort: '시간',
     minuteShort: '분',
     day: {
@@ -124,7 +136,17 @@ export const ko = {
     nextPlan:
       '오늘 해야 할 일을 정리하고 완료 여부와 사용 시간을 기록해 보세요. 반복 일정과 일일 메모로 루틴을 관리하고, 목표를 달성한 작업은 자동 아카이브로 목록을 깔끔하게 유지할 수 있습니다.',
     deleteConfirm: '"{title}" 작업을 영구 삭제할까요?\n되돌릴 수 없습니다.',
+    finishConfirm: '"{title}" 기록을 종료할까요?\n기록된 시간은 유지됩니다.',
     taskNotScheduledToday: '이 작업은 오늘 일정에 없습니다.',
+  },
+
+  keyboard: {
+    title: '키보드 단축키',
+    start: '첫 번째 실행 가능한 작업 시작/재개',
+    pause: '실행 중인 타이머 일시정지',
+    finish: '실행 중인 타이머 종료',
+    today: '오늘로 돌아가 타이머에 포커스',
+    hint: '텍스트 입력 중에는 단축키가 작동하지 않습니다.',
   },
 
   schedule: {
@@ -138,6 +160,10 @@ export const ko = {
     timerDone: {
       title: '타이머 완료',
       body: '"{task}" 작업 타이머가 완료되었습니다.',
+    },
+    targetReached: {
+      title: '계획 시간 도달',
+      body: '"{task}" 작업이 계획 시간에 도달했습니다. 초과 시간이 계속 기록됩니다.',
     },
   },
 
@@ -153,8 +179,8 @@ export const ko = {
     },
     notifications: {
       timerDone: {
-        title: '타이머 완료 알림',
-        desc: '실행 중인 타이머가 자동으로 끝나면 알림을 보냅니다.',
+        title: '계획 시간 도달 알림',
+        desc: '실행 중인 타이머가 계획 시간에 도달하면 알림을 보냅니다.',
         hintDenied:
           '알림 권한이 거부되었습니다. 시스템 설정에서 알림 권한을 허용한 뒤 다시 시도하세요.',
       },

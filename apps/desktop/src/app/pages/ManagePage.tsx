@@ -46,6 +46,7 @@ export function ManagePage(props: {
   onDelete: (taskId: string) => void; // (role: delete task, type: (string)=>void)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
+  onFinishTimer?: (task: Task) => void; // (role: finish timer, type: ((Task)=>void) | undefined)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
   taskDayStates: ReadonlyMap<string, TaskDayState>;
 }) {
@@ -74,6 +75,7 @@ export function ManagePage(props: {
     onDelete,
     onStartTimer,
     onStopTimer,
+    onFinishTimer,
     onError,
     taskDayStates,
   } = props;
@@ -206,6 +208,7 @@ export function ManagePage(props: {
             onDelete={onDelete}
             onStartTimer={onStartTimer}
             onStopTimer={onStopTimer}
+            onFinishTimer={onFinishTimer}
             onError={onError}
             taskDayStates={taskDayStates}
           />

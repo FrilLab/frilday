@@ -14,7 +14,7 @@ import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import {
-  autoStopWithCore,
+  getTargetReachedWithCore,
   startTimerWithCore,
   stopTimerWithCore,
   toggleCompletionWithCore,
@@ -27,12 +27,21 @@ type PersistedCollections = Pick<
   'tasks' | 'completions' | 'timeEntries' | 'taskDailyMemos'
 >;
 
+export type TargetReachedTask = {
+  sessionId: string;
+  taskId: string;
+  title: string;
+  actualMinutes: number;
+  plannedMinutes: number;
+};
+
 interface FrilDayState {
   hydrated: boolean;
   tasks: Task[];
   completions: Completion[];
   timeEntries: TimeEntry[];
   taskDailyMemos: TaskDailyMemo[];
+  targetReached: TargetReachedTask[];
   filter: Filter;
   errorMsg: string;
 
@@ -65,7 +74,7 @@ interface FrilDayState {
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<void>;
   stopTimer: (input: { taskId: string; today: Date }) => Promise<void>;
-  autoStopIfReached: () => Promise<string[]>;
+  checkTargetReached: () => Promise<TargetReachedTask[]>;
 }
 
 function uid(): string {
@@ -88,6 +97,22 @@ function formatError(error: unknown): string {
   }
 }
 
+function sameTargetReached(
+  left: TargetReachedTask[],
+  right: TargetReachedTask[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((target, index) => {
+    const other = right[index];
+    return (
+      target.sessionId === other?.sessionId &&
+      target.taskId === other.taskId &&
+      target.actualMinutes === other.actualMinutes &&
+      target.plannedMinutes === other.plannedMinutes
+    );
+  });
+}
+
 function persistCollections(
   next: PersistedCollections,
   failureMessage: string,
@@ -108,6 +133,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   completions: [],
   timeEntries: [],
   taskDailyMemos: [],
+  targetReached: [],
   filter: 'all',
   errorMsg: '',
 
@@ -384,7 +410,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         taskDailyMemos: get().taskDailyMemos,
       };
 
-      set({ timeEntries: nextTimeEntries, errorMsg: '' });
+      set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
       persistCollections(next, 'Failed to start timer.');
     } catch (error) {
       set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
@@ -408,61 +434,35 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         taskDailyMemos: get().taskDailyMemos,
       };
 
-      set({ timeEntries: nextTimeEntries, errorMsg: '' });
+      set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
       persistCollections(next, 'Failed to stop timer.');
     } catch (error) {
       set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
     }
   },
 
-  autoStopIfReached: async () => {
+  checkTargetReached: async () => {
     if (!get().hydrated) return [];
 
     const nowIso = new Date().toISOString();
-    let result;
+    let result: Awaited<ReturnType<typeof getTargetReachedWithCore>>;
     try {
-      result = await autoStopWithCore({
+      result = await getTargetReachedWithCore({
         timeEntries: get().timeEntries,
         tasks: get().tasks,
-        completions: get().completions,
         nowIso,
       });
     } catch (error) {
-      set({ errorMsg: `Failed to auto-stop timer. ${formatError(error)}` });
+      set({ errorMsg: `Failed to check timer target. ${formatError(error)}` });
       return [];
     }
 
-    if (result.finishedTasks.length === 0) return [];
-
-    const notifier = getNotifier();
-    for (const finishedTask of result.finishedTasks) {
-      notifier.notify({
-        level: 'info',
-        message: `Auto-stopped: ${finishedTask.title} (+${finishedTask.minutes}m)`,
-      });
-
-      if (finishedTask.autoCompleted) {
-        notifier.notify({
-          level: 'success',
-          message: `Auto-completed: ${finishedTask.title}`,
-        });
+    set((state) => {
+      if (state.errorMsg === '' && sameTargetReached(state.targetReached, result.tasks)) {
+        return state;
       }
-    }
-
-    const next = {
-      tasks: get().tasks,
-      completions: result.completions,
-      timeEntries: result.timeEntries,
-      taskDailyMemos: get().taskDailyMemos,
-    };
-
-    set({
-      timeEntries: result.timeEntries,
-      completions: result.completions,
-      errorMsg: '',
+      return { targetReached: result.tasks, errorMsg: '' };
     });
-    persistCollections(next, 'Failed to auto-stop timer.');
-
-    return result.finishedTasks.map((finishedTask) => finishedTask.title);
+    return result.tasks;
   },
 }));

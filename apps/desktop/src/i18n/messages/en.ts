@@ -67,6 +67,9 @@ export const en = {
     archive: 'Archive',
     restore: 'Restore',
     delete: 'Delete',
+    markComplete: 'Mark "{task}" complete',
+    markIncomplete: 'Mark "{task}" incomplete',
+    toggleMemoForTask: 'Toggle memo for "{task}"',
     todayTasks: "Today's tasks",
     noTasks: 'No tasks.',
     noTasksScheduledToday: 'No tasks scheduled for today.',
@@ -93,6 +96,15 @@ export const en = {
     basedOnTodayPlannedMinutes: "Based on today's planned minutes.",
     start: 'Start',
     stop: 'Stop',
+    pause: 'Pause',
+    resume: 'Resume',
+    finish: 'Finish',
+    targetReached: 'Planned target reached.',
+    overtimeTracking: 'Overtime is still tracking.',
+    startTimerForTask: 'Start timer for "{task}"',
+    resumeTimerForTask: 'Resume timer for "{task}"',
+    pauseTimerForTask: 'Pause timer for "{task}"',
+    finishTimerForTask: 'Finish timer for "{task}"',
     hourShort: 'h',
     minuteShort: 'm',
     day: {
@@ -125,7 +137,17 @@ export const en = {
     nextPlan:
       'Organize what matters today, track completion and time spent, and keep steady routines with repeat schedules and daily memos. Tasks that hit your goal can be auto-archived so your active list stays focused and clean.',
     deleteConfirm: 'Delete "{title}" permanently?\nThis cannot be undone.',
+    finishConfirm: 'Finish tracking "{title}"?\nTracked time will be kept.',
     taskNotScheduledToday: 'This task is not scheduled for today.',
+  },
+
+  keyboard: {
+    title: 'Keyboard shortcuts',
+    start: 'Start or resume the first available task',
+    pause: 'Pause the running timer',
+    finish: 'Finish the running timer',
+    today: 'Return to Today and focus the timer',
+    hint: 'Shortcuts are disabled while typing in a text field.',
   },
 
   schedule: {
@@ -139,6 +161,10 @@ export const en = {
     timerDone: {
       title: 'Timer completed',
       body: '"{task}" is finished.',
+    },
+    targetReached: {
+      title: 'Planned target reached',
+      body: '"{task}" reached its planned time. Overtime is still tracking.',
     },
   },
 
@@ -154,8 +180,8 @@ export const en = {
     },
     notifications: {
       timerDone: {
-        title: 'Timer done notification',
-        desc: 'Notify when a running timer completes automatically.',
+        title: 'Target reached notification',
+        desc: 'Notify when a running timer reaches its planned duration.',
         hintDenied:
           'Notification permission was denied. Enable notifications in system settings and try again.',
       },

@@ -46,9 +46,9 @@ persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
 
 The desktop Tauri adapter now translates the persisted `Task`, `Completion`,
 and `TimeEntry` shapes into core inputs for schedule visibility, completion
-transitions, session transitions, timer auto-stop, and statistics. SQLite
-storage remains an adapter concern; the React layer does not duplicate those
-rules.
+transitions, session transitions, target-reached feedback, and statistics.
+SQLite storage remains an adapter concern; the React layer does not duplicate
+those rules.
 
 The stable Routine/Plan/Session/Completion vocabulary and the compatibility
 mapping for the current desktop records are defined in

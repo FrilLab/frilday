@@ -73,14 +73,13 @@ export type CoreTimeTotals = {
   byTask: Array<{ taskId: string; actualMinutes: number }>;
 };
 
-export type CoreAutoStopResult = {
-  timeEntries: TimeEntry[];
-  completions: Completion[];
-  finishedTasks: Array<{
+export type CoreTargetReachedResult = {
+  tasks: Array<{
+    sessionId: string;
     taskId: string;
     title: string;
-    minutes: number;
-    autoCompleted: boolean;
+    actualMinutes: number;
+    plannedMinutes: number;
   }>;
 };
 
@@ -246,15 +245,13 @@ export async function stopTimerWithCore(input: {
   ).timeEntries;
 }
 
-export async function autoStopWithCore(input: {
+export async function getTargetReachedWithCore(input: {
   tasks: Task[];
-  completions: Completion[];
   timeEntries: TimeEntry[];
   nowIso: string;
-}): Promise<CoreAutoStopResult> {
-  return invokeCore<CoreAutoStopResult>('core_auto_stop', {
+}): Promise<CoreTargetReachedResult> {
+  return invokeCore<CoreTargetReachedResult>('core_target_reached', {
     tasks: input.tasks.map(toCoreTask),
-    completions: input.completions.map(toCoreCompletion),
     timeEntries: input.timeEntries.map(toCoreTimeEntry),
     nowIso: input.nowIso,
     nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),

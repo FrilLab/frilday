@@ -51,6 +51,7 @@ export function useAppModel() {
     completions,
     timeEntries,
     taskDailyMemos,
+    targetReached,
     errorMsg,
     clearError,
     createTask,
@@ -237,6 +238,11 @@ export function useAppModel() {
     return states;
   }, [tasks, timeTotals, visibleToday]);
 
+  const targetReachedTaskIds = useMemo(
+    () => new Set(targetReached.map((target) => target.taskId)),
+    [targetReached],
+  );
+
   const manageTasks = useMemo(() => {
     const base = showArchived
       ? tasks.filter((t) => !t.isActive)
@@ -335,7 +341,15 @@ export function useAppModel() {
     stopTimer({ taskId: task.id, today: new Date() });
     notifier.notify({
       level: 'info',
-      message: `Timer stopped`,
+      message: `Timer paused`,
+    });
+  };
+
+  const handleFinishTimer = (task: Task) => {
+    stopTimer({ taskId: task.id, today: new Date() });
+    notifier.notify({
+      level: 'info',
+      message: `Timer finished`,
     });
   };
 
@@ -346,6 +360,7 @@ export function useAppModel() {
     completions,
     timeEntries,
     taskDailyMemos,
+    targetReached,
     errorMsg,
 
     // time
@@ -375,6 +390,7 @@ export function useAppModel() {
     taskDayStates,
     todayTasks,
     manageTasks,
+    targetReachedTaskIds,
 
     // actions
     clearError,
@@ -392,5 +408,6 @@ export function useAppModel() {
     // timer actions (UI용)
     handleStartTimer,
     handleStopTimer,
+    handleFinishTimer,
   };
 }
