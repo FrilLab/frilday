@@ -158,6 +158,7 @@ mod tests {
     use super::*;
     use crate::{
         PlanStatus, PlannedDuration, RoutineId, ScheduleRule, Session, SessionId, Timestamp,
+        aggregate_for_date,
     };
 
     fn routine() -> Routine {
@@ -351,5 +352,62 @@ mod tests {
         )
         .unwrap();
         assert!(plan.has_history(&[], &[session]));
+    }
+
+    #[test]
+    fn executed_plan_keeps_its_snapshot_after_routine_changes_and_reload() {
+        let mut routine = routine();
+        let created = LocalDate::parse("2026-01-01").unwrap();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let mut plan = Plan::from_routine(&routine, date, created).unwrap();
+        plan.set_duration_override(Some(PlannedDuration::from_minutes(90).unwrap()));
+        let completion =
+            crate::Completion::for_routine_and_plan(routine.id().clone(), plan.id().clone(), date);
+        let session = Session::new(
+            SessionId::new("session-history").unwrap(),
+            Some(routine.id().clone()),
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+            Some(Timestamp::from_unix_seconds(1_767_601_800)),
+        )
+        .unwrap();
+
+        routine.set_starts_on(Some(LocalDate::parse("2026-02-01").unwrap()));
+        routine.archive();
+        let target = RoutinePlanTarget {
+            routine: &routine,
+            created_local_date: created,
+        };
+
+        let resolved = resolve_plans(
+            &[target],
+            std::slice::from_ref(&plan),
+            std::slice::from_ref(&completion),
+            date,
+            date,
+        );
+        let reloaded = resolve_plans(
+            &[target],
+            std::slice::from_ref(&plan),
+            std::slice::from_ref(&completion),
+            date,
+            date,
+        );
+
+        assert_eq!(resolved, reloaded);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id(), plan.id());
+        assert_eq!(resolved[0].planned_duration().minutes(), 90);
+        assert_eq!(
+            aggregate_for_date(
+                &resolved,
+                std::slice::from_ref(&session),
+                date,
+                Timestamp::from_unix_seconds(1_767_610_000),
+            )
+            .actual_minutes(),
+            30
+        );
     }
 }
