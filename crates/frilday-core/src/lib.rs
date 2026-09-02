@@ -598,4 +598,23 @@ mod tests {
             100.0
         );
     }
+
+    #[test]
+    fn period_statistics_respect_lifetime_occurrence_limits() {
+        let mut routine = routine();
+        routine.set_occurrence_limit(Some(3)).unwrap();
+        let start = LocalDate::parse("2026-01-05").unwrap();
+        let end = start.checked_add_days(13).unwrap();
+        let completions = vec![Completion::for_routine(routine.id().clone(), start)];
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: start,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let totals = completion_stats_between(&targets, &completions, start, end);
+
+        assert_eq!(totals.scheduled_count(), 3);
+        assert_eq!(totals.completed_count(), 1);
+    }
 }
