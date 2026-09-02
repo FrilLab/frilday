@@ -24,6 +24,12 @@ SQLite, PostgreSQL, and serialization libraries.
 - **Completion** is an independent binary signal for a routine/date or
   plan/date. Tracking time does not imply completion, and completion does not
   imply that planned time was fully tracked.
+- **Review** aggregates executable Plans and Session actual time by local date,
+  inclusive period, and Routine. It reports planned minutes, actual minutes,
+  variance (`actual - planned`), planned/completed occurrences, and an
+  uncapped execution ratio only when planned minutes are positive. Actual time
+  without an executable Plan is retained as `unplanned_actual_minutes` so
+  migrated or ad-hoc history is not hidden.
 
 ## Decisions and invariants
 
@@ -75,6 +81,12 @@ SQLite, PostgreSQL, and serialization libraries.
   silently doubles as an occurrence cap. This intentionally retires the
   confusing legacy fallback while preserving both persisted fields and all
   existing completion history.
+- Review keeps Sessions for skipped Plans as actual history but does not count
+  the skipped Plan as planned time. A moved Plan is counted on its effective
+  destination date only. Multiple Sessions for one Plan are summed, and a
+  legacy Session without a Plan id still matches an executable Routine/date
+  Plan when one is resolvable. A zero-plan bucket has no execution ratio
+  rather than a forced percentage.
 
 ## Legacy data mapping
 

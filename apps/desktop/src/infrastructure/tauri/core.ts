@@ -91,6 +91,35 @@ export type CoreStatistics = {
   weekEndYmd: string;
 };
 
+export type CoreReviewTotals = {
+  plannedMinutes: number;
+  actualMinutes: number;
+  varianceMinutes: number;
+  executionRatio: number | null;
+  plannedOccurrences: number;
+  completedOccurrences: number;
+  unplannedActualMinutes: number;
+};
+
+export type CoreRoutineReview = {
+  routineId: string;
+  totals: CoreReviewTotals;
+};
+
+export type CoreReviewDay = {
+  date: string;
+  totals: CoreReviewTotals;
+  routines: CoreRoutineReview[];
+};
+
+export type CoreReview = {
+  startDate: string;
+  endDate: string;
+  totals: CoreReviewTotals;
+  routines: CoreRoutineReview[];
+  days: CoreReviewDay[];
+};
+
 export type CoreTimeTotals = {
   plannedMinutes: number;
   actualMinutes: number;
@@ -253,6 +282,26 @@ export async function getCoreStatistics(input: {
     weekStartYmd: input.weekStartYmd,
     todayYmd: input.todayYmd,
     monthStartYmd: input.monthStartYmd,
+  });
+}
+
+export async function getCoreReview(input: {
+  tasks: Task[];
+  completions: Completion[];
+  plans?: Plan[];
+  timeEntries: TimeEntry[];
+  startYmd: string;
+  endYmd: string;
+  nowIso: string;
+}): Promise<CoreReview> {
+  return invokeCore<CoreReview>('core_review', {
+    tasks: input.tasks.map(toCoreTask),
+    completions: input.completions.map(toCoreCompletion),
+    plans: (input.plans ?? []).map(toCorePlan),
+    timeEntries: input.timeEntries.map(toCoreTimeEntry),
+    startYmd: input.startYmd,
+    endYmd: input.endYmd,
+    nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),
   });
 }
 

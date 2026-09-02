@@ -4,9 +4,10 @@ use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
     completion_count_for_routine, completion_stats_between_with_plans,
     completion_stats_for_week_with_plans, eligible_dates_between, pause_session_for_routine,
-    resume_session_for_routine, running_routine_id, start_session, stop_session_for_routine,
-    target_reached_sessions_at_with_plans, toggle_routine_completion_for_plan, Completion,
-    LocalDate, Plan, PlanId, PlanStatus, PlannedDuration, Routine, RoutineCategory, RoutineId,
+    resume_session_for_routine, review_for_range, running_routine_id, start_session,
+    stop_session_for_routine, target_reached_sessions_at_with_plans,
+    toggle_routine_completion_for_plan, Completion, LocalDate, Plan, PlanId, PlanStatus,
+    PlannedDuration, ReviewDay, ReviewPeriod, ReviewTotals, Routine, RoutineCategory, RoutineId,
     RoutinePlanTarget, RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
@@ -326,6 +327,104 @@ pub struct StatisticsOutput {
     month_start_ymd: String,
     all_start_ymd: String,
     week_end_ymd: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRequest {
+    tasks: Vec<TaskInput>,
+    completions: Vec<CompletionInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
+    time_entries: Vec<TimeEntryInput>,
+    start_ymd: String,
+    end_ymd: String,
+    now_millis: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewTotalsOutput {
+    planned_minutes: u64,
+    actual_minutes: u64,
+    variance_minutes: i64,
+    execution_ratio: Option<f64>,
+    planned_occurrences: u64,
+    completed_occurrences: u64,
+    unplanned_actual_minutes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutineReviewOutput {
+    routine_id: String,
+    totals: ReviewTotalsOutput,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDayOutput {
+    date: String,
+    totals: ReviewTotalsOutput,
+    routines: Vec<RoutineReviewOutput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewOutput {
+    start_date: String,
+    end_date: String,
+    totals: ReviewTotalsOutput,
+    routines: Vec<RoutineReviewOutput>,
+    days: Vec<ReviewDayOutput>,
+}
+
+#[tauri::command]
+pub fn core_review(request: ReviewRequest) -> Result<ReviewOutput, String> {
+    let start = parse_date(&request.start_ymd)?;
+    let end = parse_date(&request.end_ymd)?;
+    let completions = request
+        .completions
+        .iter()
+        .map(completion_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let sessions = request
+        .time_entries
+        .iter()
+        .map(session_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let routines = request
+        .tasks
+        .iter()
+        .map(routine_from_task)
+        .collect::<Result<Vec<_>, _>>()?;
+    let targets = request
+        .tasks
+        .iter()
+        .zip(routines.iter())
+        .map(|(task, routine)| {
+            Ok(RoutinePlanTarget {
+                routine,
+                created_local_date: parse_date(&task.created_local_date)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let review = review_for_range(
+        &targets,
+        &persisted_plans,
+        &completions,
+        &sessions,
+        start,
+        end,
+        Timestamp::from_unix_millis(request.now_millis),
+    );
+
+    Ok(review_to_output(&review))
 }
 
 #[tauri::command]
@@ -986,6 +1085,49 @@ fn rate_output(totals: frilday_core::CompletionTotals) -> RateOutput {
         scheduled_count: totals.scheduled_count(),
         completed_count: totals.completed_count(),
         rate: totals.rate(),
+    }
+}
+
+fn review_totals_output(totals: ReviewTotals) -> ReviewTotalsOutput {
+    let variance = totals.variance_minutes();
+    let variance_minutes = variance.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+    ReviewTotalsOutput {
+        planned_minutes: totals.planned_minutes(),
+        actual_minutes: totals.actual_minutes(),
+        variance_minutes,
+        execution_ratio: totals.execution_ratio(),
+        planned_occurrences: totals.planned_occurrences(),
+        completed_occurrences: totals.completed_occurrences(),
+        unplanned_actual_minutes: totals.unplanned_actual_minutes(),
+    }
+}
+
+fn routine_review_output(review: &frilday_core::RoutineReview) -> RoutineReviewOutput {
+    RoutineReviewOutput {
+        routine_id: review.routine_id().to_string(),
+        totals: review_totals_output(review.totals()),
+    }
+}
+
+fn review_day_output(day: &ReviewDay) -> ReviewDayOutput {
+    ReviewDayOutput {
+        date: day.date().to_string(),
+        totals: review_totals_output(day.totals()),
+        routines: day.routines().iter().map(routine_review_output).collect(),
+    }
+}
+
+fn review_to_output(review: &ReviewPeriod) -> ReviewOutput {
+    ReviewOutput {
+        start_date: review.start_date().to_string(),
+        end_date: review.end_date().to_string(),
+        totals: review_totals_output(review.totals()),
+        routines: review
+            .routines()
+            .iter()
+            .map(routine_review_output)
+            .collect(),
+        days: review.days().iter().map(review_day_output).collect(),
     }
 }
 
