@@ -25,6 +25,13 @@ interface TaskListProps {
 
   variant: 'today' | 'manage';
   onToggleToday: (task: Task) => void;
+  onSetPlanDuration?: (input: {
+    taskId: string;
+    date: string;
+    durationMinutes: number | null;
+  }) => void;
+  onSkipPlan?: (input: { taskId: string; date: string }) => void;
+  onRestorePlan?: (input: { taskId: string; date: string }) => void;
   onArchive: (taskId: string) => void;
   onRestore?: (taskId: string) => void;
   onSaveMemo?: (input: { taskId: string; date: string; text: string }) => void;
@@ -83,6 +90,9 @@ export function TaskList(props: TaskListProps) {
           openTimerTaskId={props.openTimerTaskId}
           variant={props.variant}
           onToggleToday={props.onToggleToday}
+          onSetPlanDuration={props.onSetPlanDuration}
+          onSkipPlan={props.onSkipPlan}
+          onRestorePlan={props.onRestorePlan}
           onArchive={props.onArchive}
           onRestore={props.onRestore}
           onSaveMemo={props.onSaveMemo}

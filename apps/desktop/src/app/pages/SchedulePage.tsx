@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import type { Completion, Task } from '../../shared/types';
+import type { Completion, Plan, Task } from '../../shared/types';
 import { WEEK_ORDER } from '../../domain/schedule/scheduleView';
 import {
   getVisibleScheduleSlots,
@@ -48,12 +48,20 @@ function shiftWeekStart(weekStartYmd: string, deltaDays: number): string {
 export function SchedulePage(props: {
   tasks: Task[]; // (role: all tasks, type: Task[])
   completions: Completion[]; // (role: completion logs, type: Completion[])
+  plans: Plan[]; // (role: date-specific plan snapshots, type: Plan[])
   weekStartYmd: string; // (role: current-week monday, type: string (YYYY-MM-DD))
   getMemoText?: (taskId: string, date: string) => string;
   onOpenTask?: (taskId: string) => void;
 }) {
   const { t } = useContext(LocaleContext);
-  const { tasks, completions, weekStartYmd, getMemoText, onOpenTask } = props;
+  const {
+    tasks,
+    completions,
+    plans,
+    weekStartYmd,
+    getMemoText,
+    onOpenTask,
+  } = props;
 
   const currentWeekStartYmd = useMemo(
     () => normalizeWeekStart(weekStartYmd),
@@ -75,6 +83,7 @@ export function SchedulePage(props: {
     void getVisibleScheduleSlots({
       tasks,
       completions,
+      plans,
       weekStartYmd: normalizedWeekStartYmd,
     })
       .then((slots) => {
@@ -88,7 +97,7 @@ export function SchedulePage(props: {
     return () => {
       current = false;
     };
-  }, [tasks, completions, normalizedWeekStartYmd]);
+  }, [tasks, completions, plans, normalizedWeekStartYmd]);
 
   const weekDates = useMemo(
     () => buildWeekDates(normalizedWeekStartYmd),
@@ -98,7 +107,7 @@ export function SchedulePage(props: {
 
   const week = useMemo(() => {
     const slotsByTask = new Map(
-      scheduleSlots.map((slot) => [slot.taskId, slot.dates]),
+      scheduleSlots.map((slot) => [slot.taskId, slot]),
     );
     return WEEK_ORDER.reduce<Record<(typeof WEEK_ORDER)[number], Array<{
       taskId: string;
@@ -112,16 +121,23 @@ export function SchedulePage(props: {
       (result, dow, index) => {
         const dateYmd = weekDates[index] ?? normalizedWeekStartYmd;
         result[dow] = tasks
-          .filter((task) => slotsByTask.get(task.id)?.includes(dateYmd))
-          .map((task) => ({
-            taskId: task.id,
-            title: task.title,
-            description: task.description,
-            memoText: getMemoText?.(task.id, dateYmd) ?? undefined,
-            durationMinutes: task.durationMinutes,
-            category: task.category,
-            isActive: task.isActive,
-          }))
+          .filter((task) => slotsByTask.get(task.id)?.dates.includes(dateYmd))
+          .map((task) => {
+            const slot = slotsByTask.get(task.id);
+            const plan = slot?.plans.find(
+              (candidate) =>
+                candidate.effectiveDate === dateYmd && candidate.executable,
+            );
+            return {
+              taskId: task.id,
+              title: task.title,
+              description: task.description,
+              memoText: getMemoText?.(task.id, dateYmd) ?? undefined,
+              durationMinutes: plan?.plannedDurationMinutes ?? task.durationMinutes,
+              category: task.category,
+              isActive: task.isActive,
+            };
+          })
           .sort((a, b) => {
             if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
             if (a.category !== b.category)

@@ -3,12 +3,15 @@ import type {
   Category,
   Completion,
   DayOfWeek,
+  Plan,
   Task,
   TaskDailyMemo,
   TimeEntry,
 } from '../../shared/types';
 import {
   loadAppData,
+  deletePlan,
+  savePlan,
   saveTask,
   saveTaskDailyMemo,
   saveTimeEntries,
@@ -26,6 +29,7 @@ import {
 } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
+import { createRoutinePlan, routinePlanId } from '../../domain/plan/plan';
 import {
   getTargetReachedWithCore,
   pauseTimerWithCore,
@@ -49,6 +53,7 @@ interface FrilDayState {
   hydrated: boolean;
   tasks: Task[];
   completions: Completion[];
+  plans: Plan[];
   timeEntries: TimeEntry[];
   taskDailyMemos: TaskDailyMemo[];
   targetReached: TargetReachedTask[];
@@ -85,6 +90,13 @@ interface FrilDayState {
   archiveTask: (taskId: string) => void;
   restoreTask: (taskId: string) => void;
   toggleToday: (input: { taskId: string; today: Date }) => Promise<void>;
+  setPlanDurationOverride: (input: {
+    taskId: string;
+    date: string;
+    durationMinutes: number | null;
+  }) => boolean;
+  skipPlan: (input: { taskId: string; date: string }) => boolean;
+  restorePlan: (input: { taskId: string; date: string }) => boolean;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   pauseTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
@@ -135,6 +147,25 @@ function hasOpenTimeEntry(timeEntries: TimeEntry[], taskId: string): boolean {
   );
 }
 
+function hasPlanHistory(
+  state: Pick<FrilDayState, 'timeEntries' | 'completions'>,
+  planId: string,
+  taskId: string,
+  date: string,
+): boolean {
+  return (
+    state.timeEntries.some((entry) => entry.planId === planId) ||
+    state.completions.some(
+      (completion) =>
+        completion.taskId === taskId &&
+        (completion.planId === planId ||
+          (completion.planId == null &&
+            completion.date === date &&
+            routinePlanId(taskId, date) === planId)),
+    )
+  );
+}
+
 type TimerMutationResult = {
   ok: boolean;
   changed: boolean;
@@ -178,6 +209,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   hydrated: false,
   tasks: [],
   completions: [],
+  plans: [],
   timeEntries: [],
   taskDailyMemos: [],
   targetReached: [],
@@ -203,6 +235,94 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
 
   setFilter: (filter) => set({ filter }),
   clearError: () => set({ errorMsg: '' }),
+
+  setPlanDurationOverride: ({ taskId, date, durationMinutes }) => {
+    const task = get().tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      set({ errorMsg: 'Task not found.' });
+      return false;
+    }
+    if (
+      durationMinutes != null &&
+      (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 720)
+    ) {
+      set({ errorMsg: 'Planned duration must be a whole number from 1 to 720 minutes.' });
+      return false;
+    }
+
+    const id = routinePlanId(taskId, date);
+    const current = get().plans.find((plan) => plan.id === id);
+    const hasHistory = hasPlanHistory(get(), id, taskId, date);
+    if (hasHistory) {
+      set({ errorMsg: 'Historical plans cannot be changed.' });
+      return false;
+    }
+    if (durationMinutes == null && current) {
+      set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
+      persist(() => deletePlan(id), 'Failed to restore today\'s plan.');
+      return true;
+    }
+    if (durationMinutes == null) return true;
+    const nextPlan = createRoutinePlan({
+      routineId: taskId,
+      date,
+      baselineDurationMinutes: current?.baselineDurationMinutes ?? task.durationMinutes,
+      durationOverrideMinutes: durationMinutes,
+      status: current?.status === 'skipped' ? 'planned' : current?.status,
+      movedToYmd: current?.movedToYmd,
+    });
+    const nextPlans = [
+      nextPlan,
+      ...get().plans.filter((plan) => plan.id !== nextPlan.id),
+    ];
+    set({ plans: nextPlans, errorMsg: '' });
+    persist(() => savePlan(nextPlan), 'Failed to update today\'s plan.');
+    return true;
+  },
+
+  skipPlan: ({ taskId, date }) => {
+    const task = get().tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      set({ errorMsg: 'Task not found.' });
+      return false;
+    }
+    const id = routinePlanId(taskId, date);
+    const current = get().plans.find((plan) => plan.id === id);
+    if (hasPlanHistory(get(), id, taskId, date)) {
+      set({ errorMsg: 'Historical plans cannot be changed.' });
+      return false;
+    }
+    const nextPlan = createRoutinePlan({
+      routineId: taskId,
+      date,
+      baselineDurationMinutes: current?.baselineDurationMinutes ?? task.durationMinutes,
+      durationOverrideMinutes: current?.durationOverrideMinutes,
+      status: 'skipped',
+      movedToYmd: null,
+    });
+    set({
+      plans: [nextPlan, ...get().plans.filter((plan) => plan.id !== nextPlan.id)],
+      errorMsg: '',
+    });
+    persist(() => savePlan(nextPlan), 'Failed to skip today\'s plan.');
+    return true;
+  },
+
+  restorePlan: ({ taskId, date }) => {
+    const id = routinePlanId(taskId, date);
+    const current = get().plans.find((plan) => plan.id === id);
+    if (!current) return true;
+
+    const hasHistory = hasPlanHistory(get(), id, taskId, date);
+    if (hasHistory) {
+      set({ errorMsg: 'Historical plans cannot be changed.' });
+      return false;
+    }
+
+    set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
+    persist(() => deletePlan(id), 'Failed to restore today\'s plan.');
+    return true;
+  },
 
   createTask: ({
     title,
@@ -321,9 +441,33 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         const result = await toggleCompletionWithCore({
           tasks: get().tasks,
           completions: get().completions,
+          plans: get().plans,
           taskId,
           date,
         });
+        const completed = result.completions.some(
+          (completion) => completion.taskId === taskId && completion.date === date,
+        );
+        const completion = result.completions.find(
+          (candidate) => candidate.taskId === taskId && candidate.date === date,
+        );
+        const planId = completion?.planId ?? routinePlanId(taskId, date);
+        const currentPlan = get().plans.find((plan) => plan.id === planId);
+        const materializedPlan =
+          completed && !currentPlan
+            ? createRoutinePlan({
+                routineId: taskId,
+                date,
+                baselineDurationMinutes:
+                  get().tasks.find((task) => task.id === taskId)?.durationMinutes ?? 1,
+                durationOverrideMinutes: null,
+                status: 'planned',
+                movedToYmd: null,
+              })
+            : null;
+        const nextPlans = materializedPlan
+          ? [materializedPlan, ...get().plans]
+          : get().plans;
         const toggledTask = get().tasks.find((task) => task.id === taskId);
         const taskHasOpenSession = hasOpenTimeEntry(get().timeEntries, taskId);
         const autoArchived = result.autoArchived && !taskHasOpenSession;
@@ -344,6 +488,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         const next = {
           tasks: nextTasks,
           completions: result.completions,
+          plans: nextPlans,
           timeEntries: get().timeEntries,
           taskDailyMemos: get().taskDailyMemos,
         };
@@ -355,11 +500,10 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
               setCompletion(
                 taskId,
                 date,
-                result.completions.some(
-                  (completion) =>
-                    completion.taskId === taskId && completion.date === date,
-                ),
+                completed,
+                completed ? planId : null,
               ),
+              ...(materializedPlan ? [savePlan(materializedPlan)] : []),
               ...(autoArchived
                 ? [setTaskActive(taskId, false)]
                 : []),
@@ -405,6 +549,37 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       const resuming = openEntry?.taskId === taskId && openEntry.pausedAt != null;
 
       try {
+        const task = get().tasks.find((candidate) => candidate.id === taskId);
+        if (!task) throw new Error('Task not found.');
+        const sourcePlanId = routinePlanId(taskId, date);
+        const sourcePlan = get().plans.find((plan) => plan.id === sourcePlanId);
+        if (
+          sourcePlan?.status === 'moved' &&
+          sourcePlan.movedToYmd !== date
+        ) {
+          throw new Error('Moved plans cannot be started on their source date.');
+        }
+        const movedPlan = get().plans.find(
+          (plan) =>
+            plan.routineId === taskId &&
+            plan.status === 'moved' &&
+            plan.movedToYmd === date,
+        );
+        const existingPlan = movedPlan ?? sourcePlan;
+        const executionPlan =
+          existingPlan ??
+          createRoutinePlan({
+            routineId: taskId,
+            date,
+            baselineDurationMinutes: task.durationMinutes,
+          });
+        if (executionPlan.status === 'skipped') {
+          throw new Error('Skipped plans cannot be started.');
+        }
+        if (!existingPlan) {
+          await enqueuePersistence(() => savePlan(executionPlan));
+          set({ plans: [executionPlan, ...get().plans] });
+        }
         const nextTimeEntries = resuming
           ? await resumeTimerWithCore({
               timeEntries: entries,
@@ -416,6 +591,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
               timeEntries: entries,
               sessionId: uid(),
               taskId,
+              planId: executionPlan.id,
               dateYmd: date,
               startedAt: nowIso,
             });
@@ -540,6 +716,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       result = await getTargetReachedWithCore({
         timeEntries: get().timeEntries,
         tasks: get().tasks,
+        plans: get().plans,
         nowIso,
       });
     } catch (error) {

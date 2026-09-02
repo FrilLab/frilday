@@ -96,12 +96,16 @@ export default function App() {
                 runningTaskId={m.runningTaskId}
                 openTimerTaskId={m.openTimerTaskId}
                 activeTimerTask={m.activeTimerTask}
+                activeTimerPlannedMinutes={m.activeTimerPlannedMinutes}
                 activeTimerPhase={m.activeTimerPhase}
                 getMemoText={m.getMemoText}
                 onSaveMemo={m.handleSaveDailyMemo}
                 onToggleToday={(task: Task) =>
                   m.toggleToday({ taskId: task.id, today: m.today })
                 }
+                onSetPlanDuration={m.setPlanDurationOverride}
+                onSkipPlan={m.skipPlan}
+                onRestorePlan={m.restorePlan}
                 onArchive={m.archiveTask}
                 onError={m.setError}
                 onStartTimer={m.handleStartTimer}
@@ -150,6 +154,7 @@ export default function App() {
               <SchedulePage
                 tasks={m.tasks}
                 completions={m.completions}
+                plans={m.plans}
                 getMemoText={m.getMemoText}
                 weekStartYmd={scheduleWeekStartYmd}
                 onOpenTask={() => m.setTab('manage')}

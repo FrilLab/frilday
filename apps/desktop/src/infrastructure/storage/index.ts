@@ -1,11 +1,13 @@
 import {
   CompletionsSchema,
+  PlansSchema,
   TaskDailyMemosSchema,
   TasksSchema,
   TimeEntriesSchema,
 } from '../../shared/schemas';
 import type {
   Completion,
+  Plan,
   Task,
   TaskDailyMemo,
   TimeEntry,
@@ -119,6 +121,7 @@ function loadLegacyAppData(): LegacyAppData {
   const data = {
     tasks: tasks.value,
     completions: completions.value,
+    plans: [],
     timeEntries: timeEntries.value,
     taskDailyMemos: taskDailyMemos.value,
   };
@@ -182,6 +185,7 @@ export async function loadAppData(): Promise<PersistedAppData> {
     return {
       tasks: [],
       completions: [],
+      plans: [],
       timeEntries: [],
       taskDailyMemos: [],
     };
@@ -194,6 +198,7 @@ export async function loadAppData(): Promise<PersistedAppData> {
   return {
     tasks: TasksSchema.parse(data.tasks) as Task[],
     completions: CompletionsSchema.parse(data.completions) as Completion[],
+    plans: PlansSchema.parse(data.plans ?? []),
     timeEntries: TimeEntriesSchema.parse(data.timeEntries) as TimeEntry[],
     taskDailyMemos: TaskDailyMemosSchema.parse(
       data.taskDailyMemos,
@@ -226,10 +231,23 @@ export async function setCompletion(
   taskId: string,
   date: string,
   completed: boolean,
+  planId?: string | null,
 ): Promise<void> {
   if (!isTauri()) return;
   await ensureLegacyMigration();
-  await appDb.setCompletion(taskId, date, completed);
+  await appDb.setCompletion(taskId, date, completed, planId);
+}
+
+export async function savePlan(plan: Plan): Promise<void> {
+  if (!isTauri()) return;
+  await ensureLegacyMigration();
+  await appDb.savePlan(plan);
+}
+
+export async function deletePlan(planId: string): Promise<void> {
+  if (!isTauri()) return;
+  await ensureLegacyMigration();
+  await appDb.deletePlan(planId);
 }
 
 export async function saveTimeEntries(entries: TimeEntry[]): Promise<void> {

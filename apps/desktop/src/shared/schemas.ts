@@ -88,9 +88,28 @@ export const TaskSchema = z.object({
 // (role: task list schema, type: zod schema)
 export const TasksSchema = z.array(TaskSchema);
 
+export const PlanStatusSchema = z.union([
+  z.literal('planned'),
+  z.literal('skipped'),
+  z.literal('moved'),
+]);
+
+export const PlanSchema = z.object({
+  id: z.string().min(1),
+  routineId: z.string().min(1).nullable(),
+  date: YmdSchema,
+  baselineDurationMinutes: z.number().int().min(1).max(720),
+  durationOverrideMinutes: z.number().int().min(1).max(720).nullable(),
+  status: PlanStatusSchema,
+  movedToYmd: YmdSchema.nullable(),
+});
+
+export const PlansSchema = z.array(PlanSchema);
+
 // (role: completion schema, type: zod schema)
 export const CompletionSchema = z.object({
   taskId: z.string().min(1),
+  planId: z.string().min(1).nullable().optional().default(null),
   date: YmdSchema,
 });
 
@@ -101,6 +120,7 @@ export const CompletionsSchema = z.array(CompletionSchema);
 export const TimeEntrySchema = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
+  planId: z.string().min(1).nullable().optional().default(null),
   date: YmdSchema,
   startedAt: IsoTimestampSchema,
   endedAt: IsoTimestampSchema.nullable(),

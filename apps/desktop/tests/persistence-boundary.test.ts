@@ -9,6 +9,7 @@ mock.module('@tauri-apps/api/core', () => ({
       ? {
           tasks: [],
           completions: [],
+          plans: [],
           timeEntries: [],
           taskDailyMemos: [],
         }

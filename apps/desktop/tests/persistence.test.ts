@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 type PersistedAppData = {
   tasks: typeof validRoutine[];
   completions: Array<{ taskId: string; date: string }>;
+  plans: unknown[];
   timeEntries: Array<{
     id: string;
     taskId: string;
@@ -24,6 +25,7 @@ const storageValues = new Map<string, string>();
 let databaseData: PersistedAppData = {
   tasks: [],
   completions: [],
+  plans: [],
   timeEntries: [],
   taskDailyMemos: [],
 };
@@ -139,6 +141,7 @@ describe('typed desktop persistence adapter', () => {
     databaseData = {
       tasks: [],
       completions: [],
+      plans: [],
       timeEntries: [],
       taskDailyMemos: [],
     };

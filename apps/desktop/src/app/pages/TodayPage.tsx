@@ -64,12 +64,20 @@ export function TodayPage(props: {
   runningTaskId: string | null; // (role: single running task id, type: string | null)
   openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
   activeTimerTask: Task | null; // (role: selected execution task, type: Task | null)
+  activeTimerPlannedMinutes: number;
   activeTimerPhase: ActiveTimerPhase; // (role: execution phase, type: ActiveTimerPhase)
 
   getMemoText: (taskId: string, date: string) => string;
   onSaveMemo: (input: { taskId: string; date: string; text: string }) => void;
 
   onToggleToday: (task: Task) => void; // (role: toggle completion, type: (Task)=>void)
+  onSetPlanDuration: (input: {
+    taskId: string;
+    date: string;
+    durationMinutes: number | null;
+  }) => void;
+  onSkipPlan: (input: { taskId: string; date: string }) => void;
+  onRestorePlan: (input: { taskId: string; date: string }) => void;
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
@@ -96,10 +104,14 @@ export function TodayPage(props: {
     runningTaskId,
     openTimerTaskId,
     activeTimerTask,
+    activeTimerPlannedMinutes,
     activeTimerPhase,
     getMemoText,
     onSaveMemo,
     onToggleToday,
+    onSetPlanDuration,
+    onSkipPlan,
+    onRestorePlan,
     onArchive,
     onStartTimer,
     onStopTimer,
@@ -148,6 +160,7 @@ export function TodayPage(props: {
       {activeTimerTask && (
         <ActiveTimer
           task={activeTimerTask}
+          plannedMinutes={activeTimerPlannedMinutes}
           timeEntries={timeEntries}
           dateYmd={todayYmd}
           nowIso={nowIso}
@@ -229,6 +242,9 @@ export function TodayPage(props: {
           getMemoText={getMemoText}
           onSaveMemo={onSaveMemo}
           onToggleToday={onToggleToday}
+          onSetPlanDuration={onSetPlanDuration}
+          onSkipPlan={onSkipPlan}
+          onRestorePlan={onRestorePlan}
           onArchive={onArchive}
           onStartTimer={onStartTimer}
           onStopTimer={onStopTimer}
