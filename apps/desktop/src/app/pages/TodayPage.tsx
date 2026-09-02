@@ -62,6 +62,7 @@ export function TodayPage(props: {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
   activeTimerTask: Task | null; // (role: selected execution task, type: Task | null)
   activeTimerPhase: ActiveTimerPhase; // (role: execution phase, type: ActiveTimerPhase)
 
@@ -92,6 +93,7 @@ export function TodayPage(props: {
     timeEntries,
     nowIso,
     runningTaskId,
+    openTimerTaskId,
     activeTimerTask,
     activeTimerPhase,
     getMemoText,
@@ -221,6 +223,7 @@ export function TodayPage(props: {
           todayDow={todayDow}
           nowIso={nowIso}
           runningTaskId={runningTaskId}
+          openTimerTaskId={openTimerTaskId}
           getMemoText={getMemoText}
           onSaveMemo={onSaveMemo}
           onToggleToday={onToggleToday}

@@ -13,7 +13,6 @@ pub mod schedule;
 pub mod session;
 pub mod stats;
 pub mod time;
-pub mod timer;
 
 pub use completion::{
     Completion, completion_count_for_routine, is_completed_for_plan, is_completed_on,
@@ -28,7 +27,8 @@ pub use schedule::{
     eligible_dates_between, is_eligible_on, visible_dates_between,
 };
 pub use session::{
-    Session, SessionError, SessionLedger, running_routine_id, running_session, start_session,
+    Session, SessionError, SessionLedger, open_session, pause_session_for_routine,
+    resume_session_for_routine, running_routine_id, running_session, start_session,
     stop_session_for_routine, validate_no_concurrent_sessions,
 };
 pub use stats::{
@@ -37,7 +37,6 @@ pub use stats::{
     aggregate_for_week, completion_stats_between, completion_stats_for_week,
 };
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
-pub use timer::{AutoStopResult, FinishedSession, auto_stop_sessions_at_target};
 
 #[cfg(test)]
 mod tests {
@@ -151,6 +150,116 @@ mod tests {
         .unwrap();
         assert_eq!(session.actual_duration_at(end).minutes(), 90);
         assert_eq!(session.stop(end).unwrap().minutes(), 90);
+    }
+
+    #[test]
+    fn durable_session_lifecycle_excludes_paused_time() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let routine_id = RoutineId::new("routine-1").unwrap();
+        let start = Timestamp::from_unix_seconds(1_767_600_000);
+        let paused = Timestamp::from_unix_seconds(1_767_600_600);
+        let resumed = Timestamp::from_unix_seconds(1_767_600_780);
+        let finished = Timestamp::from_unix_seconds(1_767_601_380);
+        let mut session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(routine_id.clone()),
+            None,
+            date,
+            start,
+        )
+        .unwrap();
+
+        assert_eq!(session.pause(paused).unwrap().minutes(), 10);
+        assert!(session.is_paused());
+        assert_eq!(session.actual_duration_at(finished).minutes(), 10);
+        session.resume(resumed).unwrap();
+        assert!(session.is_running());
+        assert_eq!(session.finish(finished).unwrap().minutes(), 20);
+        assert_eq!(session.actual_duration().unwrap().minutes(), 20);
+        assert_eq!(session.accumulated_millis(), 1_200_000);
+        assert!(session.ended_at().is_some());
+
+        let restored_running = Session::from_persisted(
+            SessionId::new("session-running").unwrap(),
+            Some(routine_id.clone()),
+            None,
+            date,
+            start,
+            None,
+            600_000,
+            Some(resumed),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            restored_running
+                .actual_duration_at(Timestamp::from_unix_seconds(1_767_601_080))
+                .minutes(),
+            15
+        );
+
+        let restored_paused = Session::from_persisted(
+            SessionId::new("session-paused").unwrap(),
+            Some(routine_id),
+            None,
+            date,
+            start,
+            None,
+            600_000,
+            None,
+            Some(paused),
+        )
+        .unwrap();
+        assert!(restored_paused.is_paused());
+        assert_eq!(restored_paused.actual_duration_at(finished).minutes(), 10);
+    }
+
+    #[test]
+    fn target_crossing_keeps_running_time_as_overtime() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(RoutineId::new("routine-1").unwrap()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+        )
+        .unwrap();
+
+        assert_eq!(
+            session
+                .actual_duration_at(Timestamp::from_unix_seconds(1_767_602_100))
+                .minutes(),
+            35
+        );
+        assert!(session.is_running());
+    }
+
+    #[test]
+    fn backwards_clock_transitions_are_rejected_without_mutating_state() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let start = Timestamp::from_unix_seconds(1_767_600_000);
+        let mut session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(RoutineId::new("routine-1").unwrap()),
+            None,
+            date,
+            start,
+        )
+        .unwrap();
+
+        assert_eq!(
+            session.pause(Timestamp::from_unix_seconds(1_767_599_999)),
+            Err(SessionError::ClockMovedBackwards)
+        );
+        session
+            .pause(Timestamp::from_unix_seconds(1_767_600_600))
+            .unwrap();
+        assert_eq!(
+            session.resume(Timestamp::from_unix_seconds(1_767_600_599)),
+            Err(SessionError::ClockMovedBackwards)
+        );
+        assert!(session.is_paused());
     }
 
     #[test]
@@ -275,6 +384,36 @@ mod tests {
     }
 
     #[test]
+    fn paused_session_must_be_finished_before_starting_another() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let start = Timestamp::from_unix_seconds(1_767_600_000);
+        let mut paused = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(RoutineId::new("routine-1").unwrap()),
+            None,
+            date,
+            start,
+        )
+        .unwrap();
+        paused
+            .pause(Timestamp::from_unix_seconds(1_767_600_600))
+            .unwrap();
+        let next = Session::start(
+            SessionId::new("session-2").unwrap(),
+            Some(RoutineId::new("routine-2").unwrap()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_601_200),
+        )
+        .unwrap();
+
+        assert_eq!(
+            start_session(&[paused], next, Timestamp::from_unix_seconds(1_767_601_200),),
+            Err(SessionError::OpenSessionAlreadyExists)
+        );
+    }
+
+    #[test]
     fn completed_history_survives_schedule_changes_and_archiving() {
         let mut routine = routine();
         let created = LocalDate::parse("2026-01-01").unwrap();
@@ -321,35 +460,6 @@ mod tests {
         assert_eq!(
             next[0].actual_duration_at(next[1].started_at()).minutes(),
             1
-        );
-    }
-
-    #[test]
-    fn auto_stop_keeps_overtime_and_adds_a_completion_once() {
-        let mut routine = routine();
-        routine.set_occurrence_limit(Some(2)).unwrap();
-        let date = LocalDate::parse("2026-01-05").unwrap();
-        let session = Session::start(
-            SessionId::new("session-1").unwrap(),
-            Some(routine.id().clone()),
-            None,
-            date,
-            Timestamp::from_unix_seconds(1_767_600_000),
-        )
-        .unwrap();
-        let result = auto_stop_sessions_at_target(
-            &[session],
-            &[routine.clone()],
-            &[],
-            Timestamp::from_unix_seconds(1_767_603_600),
-        )
-        .unwrap();
-
-        assert_eq!(result.finished()[0].minutes(), 60);
-        assert_eq!(result.completions().len(), 1);
-        assert_eq!(
-            result.sessions()[0].actual_duration().unwrap().minutes(),
-            60
         );
     }
 

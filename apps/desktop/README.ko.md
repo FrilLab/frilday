@@ -61,10 +61,12 @@ FrilDay는 **타이머를 중심으로 계획한 시간과 실제 투자 시간�
 
 ## 2. 타이머 기반 시간 기록
 
-각 작업은 타이머로 시간을 측정할 수 있습니다.
+각 작업은 타이머로 시간을 측정할 수 있습니다. 타이머는 실행 중 일시정지할
+수 있고, 다시 시작하거나 종료할 수 있습니다. 계획 시간이 지나도 자동으로
+종료되지 않으며 실제 시간은 초과 시간으로 계속 기록됩니다.
 
 ```
-Start → Stop
+Start → Pause → Resume → Finish
 ```
 
 시간이 기록되면 다음과 같은 데이터가 저장됩니다.
@@ -76,6 +78,9 @@ TimeEntry
   date
   startedAt
   endedAt
+  pausedAt
+  activeStartedAt
+  accumulatedMillis
   minutes
 }
 ```
@@ -289,7 +294,7 @@ React 코드는 Tauri 어댑터를 통해 이 규칙을 호출하고, `domain` �
 ```
 core_visible_schedule
 core_toggle_completion
-core_start_timer / core_stop_timer
+core_start_timer / core_pause_timer / core_resume_timer / core_stop_timer
 ```
 
 ---

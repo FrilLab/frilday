@@ -38,6 +38,12 @@ pub struct TimeEntryRecord {
     pub date: String,
     pub started_at: String,
     pub ended_at: Option<String>,
+    #[serde(default)]
+    pub paused_at: Option<String>,
+    #[serde(default)]
+    pub active_started_at: Option<String>,
+    #[serde(default)]
+    pub accumulated_millis: u64,
     pub minutes: u32,
 }
 
@@ -84,13 +90,6 @@ pub struct CompletionStateRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoStopTransitionRequest {
-    pub time_entries: Vec<TimeEntryRecord>,
-    pub completions: Vec<CompletionRecord>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SettingRequest {
     pub key: String,
     pub value: Value,
@@ -131,6 +130,9 @@ struct TimeEntryRow {
     date: String,
     started_at: String,
     ended_at: Option<String>,
+    paused_at: Option<String>,
+    active_started_at: Option<String>,
+    accumulated_millis: i64,
     minutes: i64,
 }
 
@@ -189,6 +191,9 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             date TEXT NOT NULL,
             started_at TEXT NOT NULL,
             ended_at TEXT,
+            paused_at TEXT,
+            active_started_at TEXT,
+            accumulated_millis INTEGER NOT NULL DEFAULT 0,
             minutes INTEGER NOT NULL
         )",
         "CREATE TABLE IF NOT EXISTS task_daily_memos (
@@ -206,6 +211,29 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             .execute(pool)
             .await
             .map_err(|error| format!("Failed to initialize app database: {error}"))?;
+    }
+
+    // Existing installations have the original six-column time_entries table.
+    // Add lifecycle columns in place so the persisted database filename and
+    // legacy records remain usable.
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('time_entries')")
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("Failed to inspect time entry schema: {error}"))?;
+    for (name, definition) in [
+        ("paused_at", "TEXT"),
+        ("active_started_at", "TEXT"),
+        ("accumulated_millis", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !columns.iter().any(|column| column == name) {
+            sqlx::query(&format!(
+                "ALTER TABLE time_entries ADD COLUMN {name} {definition}"
+            ))
+            .execute(pool)
+            .await
+            .map_err(|error| format!("Failed to migrate time entry schema: {error}"))?;
+        }
     }
 
     Ok(())
@@ -235,7 +263,8 @@ pub async fn load_app_data_from_pool(pool: &SqlitePool) -> Result<AppData, Strin
     .map_err(|error| format!("Failed to load completions: {error}"))?;
 
     let time_entry_rows = sqlx::query_as::<_, TimeEntryRow>(
-        "SELECT id, task_id, date, started_at, ended_at, minutes
+        "SELECT id, task_id, date, started_at, ended_at, paused_at,
+                active_started_at, accumulated_millis, minutes
          FROM time_entries ORDER BY started_at DESC",
     )
     .fetch_all(pool)
@@ -316,6 +345,10 @@ fn time_entry_from_row(row: TimeEntryRow) -> Result<TimeEntryRecord, String> {
         date: row.date,
         started_at: row.started_at,
         ended_at: row.ended_at,
+        paused_at: row.paused_at,
+        active_started_at: row.active_started_at,
+        accumulated_millis: u64::try_from(row.accumulated_millis)
+            .map_err(|_| "Time entry accumulated duration is invalid".to_owned())?,
         minutes: u32::try_from(row.minutes)
             .map_err(|_| "Time entry duration is outside the supported range".to_owned())?,
     })
@@ -488,13 +521,18 @@ async fn insert_time_entry(
     entry: &TimeEntryRecord,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO time_entries (id, task_id, date, started_at, ended_at, minutes)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO time_entries (
+            id, task_id, date, started_at, ended_at, paused_at,
+            active_started_at, accumulated_millis, minutes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             task_id = excluded.task_id,
             date = excluded.date,
             started_at = excluded.started_at,
             ended_at = excluded.ended_at,
+            paused_at = excluded.paused_at,
+            active_started_at = excluded.active_started_at,
+            accumulated_millis = excluded.accumulated_millis,
             minutes = excluded.minutes",
     )
     .bind(&entry.id)
@@ -502,6 +540,13 @@ async fn insert_time_entry(
     .bind(&entry.date)
     .bind(&entry.started_at)
     .bind(&entry.ended_at)
+    .bind(&entry.paused_at)
+    .bind(&entry.active_started_at)
+    .bind(
+        i64::try_from(entry.accumulated_millis).map_err(|_| {
+            "Time entry accumulated duration is outside the supported range".to_owned()
+        })?,
+    )
     .bind(i64::from(entry.minutes))
     .execute(&mut **executor)
     .await
@@ -514,8 +559,10 @@ async fn insert_time_entry_if_absent(
     entry: &TimeEntryRecord,
 ) -> Result<(), String> {
     sqlx::query(
-        "INSERT INTO time_entries (id, task_id, date, started_at, ended_at, minutes)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO time_entries (
+            id, task_id, date, started_at, ended_at, paused_at,
+            active_started_at, accumulated_millis, minutes
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING",
     )
     .bind(&entry.id)
@@ -523,6 +570,13 @@ async fn insert_time_entry_if_absent(
     .bind(&entry.date)
     .bind(&entry.started_at)
     .bind(&entry.ended_at)
+    .bind(&entry.paused_at)
+    .bind(&entry.active_started_at)
+    .bind(
+        i64::try_from(entry.accumulated_millis).map_err(|_| {
+            "Time entry accumulated duration is outside the supported range".to_owned()
+        })?,
+    )
     .bind(i64::from(entry.minutes))
     .execute(&mut **executor)
     .await
@@ -733,35 +787,6 @@ pub async fn save_time_entries(
         .map_err(|error| format!("Failed to commit app data transaction: {error}"))
 }
 
-async fn save_auto_stop_transition_to_pool(
-    pool: &SqlitePool,
-    request: &AutoStopTransitionRequest,
-) -> Result<(), String> {
-    let mut transaction = pool
-        .begin()
-        .await
-        .map_err(|error| format!("Failed to begin app data transaction: {error}"))?;
-    for entry in &request.time_entries {
-        insert_time_entry(&mut transaction, entry).await?;
-    }
-    for completion in &request.completions {
-        insert_completion(&mut transaction, completion).await?;
-    }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| format!("Failed to commit app data transaction: {error}"))
-}
-
-#[tauri::command]
-pub async fn save_auto_stop_transition(
-    db_instances: State<'_, DbInstances>,
-    request: AutoStopTransitionRequest,
-) -> Result<(), String> {
-    let pool = database_pool(&db_instances).await?;
-    save_auto_stop_transition_to_pool(&pool, &request).await
-}
-
 #[tauri::command]
 pub async fn save_task_daily_memo(
     db_instances: State<'_, DbInstances>,
@@ -857,7 +882,10 @@ mod tests {
                 task_id: "task-1".to_owned(),
                 date: "2026-01-05".to_owned(),
                 started_at: "2026-01-05T09:00:00.000Z".to_owned(),
-                ended_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
+                ended_at: None,
+                paused_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
+                active_started_at: None,
+                accumulated_millis: 1_800_000,
                 minutes: 30,
             }],
             task_daily_memos: vec![TaskDailyMemoRecord {
@@ -944,6 +972,9 @@ mod tests {
                     date: "2025-12-29".to_owned(),
                     started_at: "2025-12-29T09:00:00.000Z".to_owned(),
                     ended_at: Some("2025-12-29T09:40:00.000Z".to_owned()),
+                    paused_at: None,
+                    active_started_at: None,
+                    accumulated_millis: 0,
                     minutes: 40,
                 },
                 TimeEntryRecord {
@@ -952,6 +983,9 @@ mod tests {
                     date: "2026-01-05".to_owned(),
                     started_at: "2026-01-05T10:00:00.000Z".to_owned(),
                     ended_at: None,
+                    paused_at: None,
+                    active_started_at: None,
+                    accumulated_millis: 0,
                     minutes: 0,
                 },
                 TimeEntryRecord {
@@ -960,6 +994,9 @@ mod tests {
                     date: "2025-12-20".to_owned(),
                     started_at: "2025-12-20T11:00:00.000Z".to_owned(),
                     ended_at: Some("2025-12-20T11:25:00.000Z".to_owned()),
+                    paused_at: None,
+                    active_started_at: None,
+                    accumulated_millis: 0,
                     minutes: 25,
                 },
                 TimeEntryRecord {
@@ -968,6 +1005,9 @@ mod tests {
                     date: "2026-01-06".to_owned(),
                     started_at: "2026-01-06T14:00:00.000Z".to_owned(),
                     ended_at: Some("2026-01-06T15:10:00.000Z".to_owned()),
+                    paused_at: None,
+                    active_started_at: None,
+                    accumulated_millis: 0,
                     minutes: 70,
                 },
             ],
@@ -1013,6 +1053,63 @@ mod tests {
             .unwrap();
         initialize_schema(&pool).await.unwrap();
         pool
+    }
+
+    #[test]
+    fn upgrades_the_original_time_entry_schema_in_place() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE time_entries (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    minutes INTEGER NOT NULL
+                )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            initialize_schema(&pool).await.unwrap();
+
+            let columns: Vec<String> =
+                sqlx::query_scalar("SELECT name FROM pragma_table_info('time_entries')")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert!(columns.iter().any(|column| column == "paused_at"));
+            assert!(columns.iter().any(|column| column == "active_started_at"));
+            assert!(columns.iter().any(|column| column == "accumulated_millis"));
+
+            sqlx::query(
+                "INSERT INTO time_entries
+                 (id, task_id, date, started_at, ended_at, minutes)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind("legacy-entry")
+            .bind("task-1")
+            .bind("2026-01-05")
+            .bind("2026-01-05T09:00:00.000Z")
+            .bind(Option::<String>::None)
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            let loaded = load_app_data_from_pool(&pool).await.unwrap();
+            let entry = &loaded.time_entries[0];
+            assert_eq!(entry.id, "legacy-entry");
+            assert_eq!(entry.paused_at, None);
+            assert_eq!(entry.active_started_at, None);
+            assert_eq!(entry.accumulated_millis, 0);
+        });
     }
 
     #[test]
@@ -1115,80 +1212,6 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0);
             assert_eq!(migration_marker(&pool).await.unwrap(), None);
-        });
-    }
-
-    #[test]
-    fn auto_stop_transition_commits_entries_and_completions_together() {
-        tauri::async_runtime::block_on(async {
-            let pool = test_pool().await;
-            let request = AutoStopTransitionRequest {
-                time_entries: vec![TimeEntryRecord {
-                    id: "entry-1".to_owned(),
-                    task_id: "task-1".to_owned(),
-                    date: "2026-01-05".to_owned(),
-                    started_at: "2026-01-05T09:00:00.000Z".to_owned(),
-                    ended_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
-                    minutes: 30,
-                }],
-                completions: vec![CompletionRecord {
-                    task_id: "task-1".to_owned(),
-                    date: "2026-01-05".to_owned(),
-                }],
-            };
-
-            save_auto_stop_transition_to_pool(&pool, &request)
-                .await
-                .unwrap();
-
-            let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_entries")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-            let completions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM completions")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-            assert_eq!(entries, 1);
-            assert_eq!(completions, 1);
-        });
-    }
-
-    #[test]
-    fn failed_auto_stop_transition_rolls_back_all_records() {
-        tauri::async_runtime::block_on(async {
-            let pool = test_pool().await;
-            sqlx::query(
-                "CREATE TRIGGER fail_auto_stop_completion
-                 BEFORE INSERT ON completions
-                 BEGIN SELECT RAISE(ABORT, 'completion insert failed'); END",
-            )
-            .execute(&pool)
-            .await
-            .unwrap();
-            let request = AutoStopTransitionRequest {
-                time_entries: vec![TimeEntryRecord {
-                    id: "entry-1".to_owned(),
-                    task_id: "task-1".to_owned(),
-                    date: "2026-01-05".to_owned(),
-                    started_at: "2026-01-05T09:00:00.000Z".to_owned(),
-                    ended_at: Some("2026-01-05T09:30:00.000Z".to_owned()),
-                    minutes: 30,
-                }],
-                completions: vec![CompletionRecord {
-                    task_id: "task-1".to_owned(),
-                    date: "2026-01-05".to_owned(),
-                }],
-            };
-
-            assert!(save_auto_stop_transition_to_pool(&pool, &request)
-                .await
-                .is_err());
-            let entries: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_entries")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-            assert_eq!(entries, 0);
         });
     }
 }

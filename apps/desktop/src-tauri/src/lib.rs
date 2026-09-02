@@ -19,7 +19,6 @@ pub fn run() {
             persistence::delete_task,
             persistence::set_completion,
             persistence::save_time_entries,
-            persistence::save_auto_stop_transition,
             persistence::save_task_daily_memo,
             persistence::get_setting,
             persistence::set_setting,
@@ -32,7 +31,8 @@ pub fn run() {
             core_commands::core_running_task_id,
             core_commands::core_start_timer,
             core_commands::core_stop_timer,
-            core_commands::core_auto_stop
+            core_commands::core_pause_timer,
+            core_commands::core_resume_timer
         ])
         .setup(bootstrap::setup)
         .run(tauri::generate_context!())

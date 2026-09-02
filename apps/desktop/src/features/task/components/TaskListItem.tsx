@@ -19,6 +19,7 @@ interface TaskListItemProps {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
 
   variant: 'today' | 'manage'; // (role: UI behavior switch, type: union)
   memoText?: string; // (role: today memo text, type: string | undefined)
@@ -49,6 +50,7 @@ export function TaskListItem(props: TaskListItemProps) {
     task,
     todayYmd,
     runningTaskId,
+    openTimerTaskId,
     variant,
     memoText,
     onToggleToday,
@@ -79,8 +81,10 @@ export function TaskListItem(props: TaskListItemProps) {
       ? null
       : `(${Math.min(doneCountTotal, task.autoArchiveAfter)}/${task.autoArchiveAfter})`;
 
-  // Store policy: only ONE running entry is active at a time.
+  // Store policy: only ONE open entry is active at a time.
   const running = runningTaskId === task.id;
+  const open = openTimerTaskId === task.id;
+  const paused = open && !running;
 
   const totalMinutesToday = taskDayState?.actualMinutes ?? 0;
 
@@ -242,9 +246,13 @@ export function TaskListItem(props: TaskListItemProps) {
                 · {tr('task.autoArchiveAfter')}: {autoArchiveProgressLabel}
               </span>
             )}
-            {running && (
-              <span className="ml-2 text-emerald-200">
-                · {tr('common.running')}
+            {open && (
+              <span
+                className={clsx(
+                  'ml-2',
+                  paused ? 'text-sky-200' : 'text-emerald-200',
+                )}>
+                · {paused ? tr('timer.paused') : tr('common.running')}
               </span>
             )}
             {!scheduledToday && (
@@ -282,16 +290,16 @@ export function TaskListItem(props: TaskListItemProps) {
                   onStopTimer(task);
                   return;
                 }
-                if (!scheduledToday) {
+                if (!scheduledToday && !open) {
                   onError(tr('note.taskNotScheduledToday'));
                   return;
                 }
                 onStartTimer(task);
               }}
-              disabled={(!scheduledToday && !running) || (doneToday && !running)}
+              disabled={(!scheduledToday && !open) || (doneToday && !open)}
               className={[
                 'rounded-xl border px-3 py-2 text-sm transition min-w-18 shrink-0',
-                running
+                open
                   ? 'border-rose-400/30 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15'
                   : doneToday
                     ? 'border-zinc-800 bg-zinc-900/40 text-zinc-200 hover:bg-zinc-900/70'
@@ -306,7 +314,7 @@ export function TaskListItem(props: TaskListItemProps) {
               ) : (
                 <span className="flex items-center gap-1">
                   <Play size={14} />
-                  {hasTrackedTime ? tr('time.resume') : tr('time.start')}
+                  {open || hasTrackedTime ? tr('time.resume') : tr('time.start')}
                 </span>
               )}
             </button>

@@ -73,15 +73,6 @@ async function saveTimeEntries(entries: TimeEntry[]): Promise<void> {
   return invokePersistence<void>('save_time_entries', { entries });
 }
 
-async function saveAutoStopTransition(
-  timeEntries: TimeEntry[],
-  completions: Completion[],
-): Promise<void> {
-  return invokePersistence<void>('save_auto_stop_transition', {
-    request: { timeEntries, completions },
-  });
-}
-
 async function saveTaskDailyMemo(memo: TaskDailyMemo): Promise<void> {
   return invokePersistence<void>('save_task_daily_memo', { memo });
 }
@@ -115,7 +106,6 @@ export const appDb = {
   deleteTask,
   setCompletion,
   saveTimeEntries,
-  saveAutoStopTransition,
   saveTaskDailyMemo,
   getSetting,
   setSetting,

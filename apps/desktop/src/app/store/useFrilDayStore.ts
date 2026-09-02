@@ -11,7 +11,6 @@ import {
   deleteTask as deletePersistedTask,
   loadAppData,
   saveTask,
-  saveAutoStopTransition,
   saveTaskDailyMemo,
   saveTimeEntries,
   setCompletion,
@@ -26,7 +25,8 @@ import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import {
-  autoStopWithCore,
+  pauseTimerWithCore,
+  resumeTimerWithCore,
   startTimerWithCore,
   stopTimerWithCore,
   toggleCompletionWithCore,
@@ -71,8 +71,9 @@ interface FrilDayState {
   toggleToday: (input: { taskId: string; today: Date }) => Promise<void>;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
-  stopTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
-  autoStopIfReached: () => Promise<string[]>;
+  pauseTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
+  resumeTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
+  finishTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
 }
 
 function uid(): string {
@@ -110,6 +111,22 @@ function persist(
       errorMsg: `${failureMessage} ${formatError(error)}`,
     });
   });
+}
+
+async function persistTimerEntries(
+  entries: TimeEntry[],
+  failureMessage: string,
+): Promise<boolean> {
+  try {
+    await enqueuePersistence(() => saveTimeEntries(entries));
+    return true;
+  } catch (error) {
+    console.error(failureMessage, error);
+    useFrilDayStore.setState({
+      errorMsg: `${failureMessage} ${formatError(error)}`,
+    });
+    return false;
+  }
 }
 
 const enqueuePersistence = createSerialQueue();
@@ -382,24 +399,33 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       const nowIso = new Date().toISOString();
 
       const entries = get().timeEntries;
-      const runningEntry = entries.find((entry) => entry.endedAt == null);
-      if (runningEntry?.taskId === taskId) {
+      const openEntry = entries.find((entry) => entry.endedAt == null);
+      if (openEntry?.taskId === taskId && openEntry.activeStartedAt != null) {
         return { ok: true, changed: false };
       }
+      const resuming = openEntry?.taskId === taskId && openEntry.pausedAt != null;
 
       try {
-        const nextTimeEntries = await startTimerWithCore({
-          timeEntries: entries,
-          sessionId: uid(),
-          taskId,
-          dateYmd: date,
-          startedAt: nowIso,
-        });
+        const nextTimeEntries = resuming
+          ? await resumeTimerWithCore({
+              timeEntries: entries,
+              taskId,
+              dateYmd: date,
+              resumedAt: nowIso,
+            })
+          : await startTimerWithCore({
+              timeEntries: entries,
+              sessionId: uid(),
+              taskId,
+              dateYmd: date,
+              startedAt: nowIso,
+            });
+        if (
+          !(await persistTimerEntries(nextTimeEntries, 'Failed to start timer.'))
+        ) {
+          return { ok: false, changed: false };
+        }
         set({ timeEntries: nextTimeEntries, errorMsg: '' });
-        persist(
-          () => saveTimeEntries(nextTimeEntries),
-          'Failed to start timer.',
-        );
         return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
@@ -407,14 +433,82 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       }
     }),
 
-  stopTimer: ({ taskId, today }) =>
+  pauseTimer: ({ taskId, today }) =>
     enqueueTimerMutation(async () => {
       const date = toYmd(today);
       const nowIso = new Date().toISOString();
       const hasRunningEntry = get().timeEntries.some(
-        (entry) => entry.taskId === taskId && entry.endedAt == null,
+        (entry) =>
+          entry.taskId === taskId &&
+          entry.endedAt == null &&
+          (entry.activeStartedAt != null || entry.pausedAt == null),
       );
       if (!hasRunningEntry) {
+        return { ok: false, changed: false };
+      }
+
+      try {
+        const nextTimeEntries = await pauseTimerWithCore({
+          timeEntries: get().timeEntries,
+          taskId,
+          dateYmd: date,
+          pausedAt: nowIso,
+        });
+        if (
+          !(await persistTimerEntries(nextTimeEntries, 'Failed to pause timer.'))
+        ) {
+          return { ok: false, changed: false };
+        }
+        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        return { ok: true, changed: true };
+      } catch (error) {
+        set({ errorMsg: `Failed to pause timer. ${formatError(error)}` });
+        return { ok: false, changed: false };
+      }
+    }),
+
+  resumeTimer: ({ taskId, today }) =>
+    enqueueTimerMutation(async () => {
+      const date = toYmd(today);
+      const nowIso = new Date().toISOString();
+      const hasPausedEntry = get().timeEntries.some(
+        (entry) =>
+          entry.taskId === taskId &&
+          entry.endedAt == null &&
+          entry.pausedAt != null,
+      );
+      if (!hasPausedEntry) {
+        return { ok: false, changed: false };
+      }
+
+      try {
+        const nextTimeEntries = await resumeTimerWithCore({
+          timeEntries: get().timeEntries,
+          taskId,
+          dateYmd: date,
+          resumedAt: nowIso,
+        });
+        if (
+          !(await persistTimerEntries(nextTimeEntries, 'Failed to resume timer.'))
+        ) {
+          return { ok: false, changed: false };
+        }
+        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        return { ok: true, changed: true };
+      } catch (error) {
+        set({ errorMsg: `Failed to resume timer. ${formatError(error)}` });
+        return { ok: false, changed: false };
+      }
+    }),
+
+  finishTimer: ({ taskId, today }) =>
+    enqueueTimerMutation(async () => {
+      const date = toYmd(today);
+      const nowIso = new Date().toISOString();
+      const hasOpenEntry = get().timeEntries.some(
+        (entry) => entry.taskId === taskId && entry.endedAt == null,
+      );
+      if (!hasOpenEntry) {
         return { ok: false, changed: false };
       }
 
@@ -425,72 +519,16 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           dateYmd: date,
           endedAt: nowIso,
         });
+        if (
+          !(await persistTimerEntries(nextTimeEntries, 'Failed to finish timer.'))
+        ) {
+          return { ok: false, changed: false };
+        }
         set({ timeEntries: nextTimeEntries, errorMsg: '' });
-        persist(
-          () => saveTimeEntries(nextTimeEntries),
-          'Failed to stop timer.',
-        );
         return { ok: true, changed: true };
       } catch (error) {
-        set({ errorMsg: `Failed to stop timer. ${formatError(error)}` });
+        set({ errorMsg: `Failed to finish timer. ${formatError(error)}` });
         return { ok: false, changed: false };
       }
     }),
-
-  autoStopIfReached: async () => {
-    if (!get().hydrated) return [];
-
-    const nowIso = new Date().toISOString();
-    let result;
-    try {
-      result = await autoStopWithCore({
-        timeEntries: get().timeEntries,
-        tasks: get().tasks,
-        completions: get().completions,
-        nowIso,
-      });
-    } catch (error) {
-      set({ errorMsg: `Failed to auto-stop timer. ${formatError(error)}` });
-      return [];
-    }
-
-    if (result.finishedTasks.length === 0) return [];
-
-    const notifier = getNotifier();
-    for (const finishedTask of result.finishedTasks) {
-      notifier.notify({
-        level: 'info',
-        message: `Auto-stopped: ${finishedTask.title} (+${finishedTask.minutes}m)`,
-      });
-
-      if (finishedTask.autoCompleted) {
-        notifier.notify({
-          level: 'success',
-          message: `Auto-completed: ${finishedTask.title}`,
-        });
-      }
-    }
-
-    const previousCompletions = get().completions;
-    const addedCompletions = result.completions.filter(
-      (completion) =>
-        !previousCompletions.some(
-          (previous) =>
-            previous.taskId === completion.taskId &&
-            previous.date === completion.date,
-        ),
-    );
-
-    set({
-      timeEntries: result.timeEntries,
-      completions: result.completions,
-      errorMsg: '',
-    });
-    persist(
-      () => saveAutoStopTransition(result.timeEntries, addedCompletions),
-      'Failed to auto-stop timer.',
-    );
-
-    return result.finishedTasks.map((finishedTask) => finishedTask.title);
-  },
 }));
