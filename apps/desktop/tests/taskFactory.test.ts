@@ -27,6 +27,12 @@ describe('routine factory', () => {
     expect(() =>
       createTaskEntity({ ...baseInput, occurrenceLimit: 0 }),
     ).toThrow('Occurrence limit');
+    expect(() =>
+      createTaskEntity({ ...baseInput, title: 'x'.repeat(81) }),
+    ).toThrow('Title is too long');
+    expect(() =>
+      createTaskEntity({ ...baseInput, description: 'x'.repeat(2001) }),
+    ).toThrow('Description is too long');
   });
 
   test('normalizes routine text and retains recurring defaults', () => {

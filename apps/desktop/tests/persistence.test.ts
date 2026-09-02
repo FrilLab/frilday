@@ -191,4 +191,17 @@ describe('typed desktop persistence adapter', () => {
     expect(saveTaskCalls).toBe(1);
     expect(databaseData.tasks).toEqual([validRoutine]);
   });
+
+  test('loads older routines with long text without losing persisted data', async () => {
+    const legacyTextRoutine = {
+      ...validRoutine,
+      title: 'x'.repeat(81),
+      description: 'y'.repeat(2001),
+    };
+    databaseData.tasks = [legacyTextRoutine];
+
+    const data = await loadAppData();
+
+    expect(data.tasks).toEqual([legacyTextRoutine]);
+  });
 });

@@ -70,8 +70,11 @@ const StartYmdSchema = z.preprocess((value) => {
 // (role: task schema, type: zod schema)
 export const TaskSchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1).max(80),
-  description: z.string().max(2000).optional().default(''),
+  // Persisted text remains backward-compatible with records created before
+  // the current editor limits. New and edited routines are validated by the
+  // form and task factory before they reach persistence.
+  title: z.string().min(1),
+  description: z.string().optional().default(''),
   category: CategorySchema,
   daysOfWeek: z.array(DayOfWeekSchema).min(1),
   durationMinutes: z.number().int().min(1).max(720),

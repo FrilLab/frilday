@@ -87,7 +87,40 @@ mod tests {
                 created,
                 &completions,
             ),
-            vec![monday, monday.checked_add_days(1).unwrap()]
+            vec![monday]
+        );
+    }
+
+    #[test]
+    fn occurrence_limit_is_consumed_by_incomplete_prior_occurrences() {
+        let mut routine = routine();
+        routine.set_occurrence_limit(Some(3)).unwrap();
+        let first_week = LocalDate::parse("2026-01-05").unwrap();
+        let second_week = LocalDate::parse("2026-01-12").unwrap();
+
+        assert_eq!(
+            visible_dates_between(
+                &routine,
+                first_week,
+                first_week.checked_add_days(6).unwrap(),
+                first_week,
+                &[],
+            ),
+            vec![
+                first_week,
+                first_week.checked_add_days(1).unwrap(),
+                first_week.checked_add_days(2).unwrap()
+            ]
+        );
+        assert!(
+            visible_dates_between(
+                &routine,
+                second_week,
+                second_week.checked_add_days(6).unwrap(),
+                first_week,
+                &[],
+            )
+            .is_empty()
         );
     }
 
