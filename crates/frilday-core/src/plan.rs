@@ -1,9 +1,11 @@
 use std::fmt;
 
 use crate::{
+    completion::Completion,
     date::LocalDate,
     ids::{PlanId, RoutineId},
     routine::Routine,
+    session::Session,
     time::PlannedDuration,
 };
 
@@ -159,6 +161,23 @@ impl Plan {
 
     pub const fn is_executable(&self) -> bool {
         !matches!(self.status, PlanStatus::Skipped)
+    }
+
+    /// A Plan with actual-work or completion history is an immutable
+    /// historical snapshot. Adapters can use this before applying a
+    /// date-specific adjustment so recorded actuals are never rewritten.
+    pub fn has_history(&self, completions: &[Completion], sessions: &[Session]) -> bool {
+        completions.iter().any(|completion| {
+            completion.plan_id() == Some(&self.id)
+                || self.routine_id.as_ref().is_some_and(|routine_id| {
+                    completion.matches_routine_on(routine_id, self.date)
+                        || completion.matches_routine_on(routine_id, self.effective_date())
+                })
+        }) || sessions.iter().any(|session| {
+            session.plan_id() == Some(&self.id)
+                || (session.routine_id() == self.routine_id.as_ref()
+                    && (session.date() == self.date || session.date() == self.effective_date()))
+        })
     }
 
     pub fn set_duration_override(&mut self, duration: Option<PlannedDuration>) {

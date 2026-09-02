@@ -1532,7 +1532,7 @@ mod tests {
             let data = sample_data();
 
             let result = import_app_data(&pool, &data).await.unwrap();
-            assert_eq!(result.imported, true);
+            assert!(result.imported);
             assert_eq!(load_app_data_from_pool(&pool).await.unwrap(), data);
         });
     }
@@ -1607,8 +1607,8 @@ mod tests {
             assert_eq!(migration_marker(&pool).await.unwrap().as_deref(), Some("1"));
 
             let second = import_app_data(&pool, &data).await.unwrap();
-            assert_eq!(second.imported, false);
-            assert_eq!(second.skipped_existing_data, false);
+            assert!(!second.imported);
+            assert!(!second.skipped_existing_data);
             let mut reloaded = load_app_data_from_pool(&pool).await.unwrap();
             normalize_loaded_order(&mut reloaded);
             assert_eq!(reloaded, expected);
@@ -1623,7 +1623,7 @@ mod tests {
 
             import_app_data(&pool, &data).await.unwrap();
             let second = import_app_data(&pool, &data).await.unwrap();
-            assert_eq!(second.imported, false);
+            assert!(!second.imported);
 
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
                 .fetch_one(&pool)
@@ -1655,7 +1655,7 @@ mod tests {
             transaction.commit().await.unwrap();
 
             let result = import_app_data(&pool, &sample_data()).await.unwrap();
-            assert_eq!(result.skipped_existing_data, true);
+            assert!(result.skipped_existing_data);
             let loaded = load_app_data_from_pool(&pool).await.unwrap();
             assert_eq!(loaded.tasks.len(), 2);
             assert!(loaded.tasks.iter().any(|task| task.id == "existing"));

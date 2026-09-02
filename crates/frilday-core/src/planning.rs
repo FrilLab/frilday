@@ -136,7 +136,9 @@ struct PlanKey(crate::RoutineId, LocalDate);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PlanStatus, PlannedDuration, RoutineId, ScheduleRule, Timestamp};
+    use crate::{
+        PlanStatus, PlannedDuration, RoutineId, ScheduleRule, Session, SessionId, Timestamp,
+    };
 
     fn routine() -> Routine {
         Routine::new(
@@ -276,5 +278,43 @@ mod tests {
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].effective_date(), destination);
         assert_eq!(plans[0].date(), source);
+    }
+
+    #[test]
+    fn moving_onto_a_scheduled_date_keeps_one_effective_occurrence() {
+        let routine = routine();
+        let source = LocalDate::parse("2026-01-05").unwrap();
+        let destination = LocalDate::parse("2026-01-06").unwrap();
+        let mut moved = Plan::from_routine(&routine, source, source).unwrap();
+        moved.move_to(destination);
+        let targets = [RoutinePlanTarget {
+            routine: &routine,
+            created_local_date: source,
+        }];
+
+        let plans = resolve_plans(&targets, &[moved], &[], source, destination);
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].effective_date(), destination);
+    }
+
+    #[test]
+    fn history_makes_a_plan_immutable_for_adjustments() {
+        let routine = routine();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let plan = Plan::from_routine(&routine, date, date).unwrap();
+        let completion =
+            Completion::for_routine_and_plan(routine.id().clone(), plan.id().clone(), date);
+        assert!(plan.has_history(&[completion], &[]));
+
+        let session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(routine.id().clone()),
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_225_600),
+        )
+        .unwrap();
+        assert!(plan.has_history(&[], &[session]));
     }
 }

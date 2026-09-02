@@ -214,9 +214,10 @@ export const ko = {
     weekSummary: '계획된 {days}일 · {plans}개 계획',
     planningHint: '시간 예산을 기준으로 한 주를 계획하세요. 루틴 기본값은 바뀌지 않습니다.',
     durationHint: '여기서 바꾼 시간과 건너뛰기는 해당 날짜에만 적용됩니다. 반복 기본값은 루틴에서 관리하세요.',
+    capacity: '일일 계획 용량: {duration}',
     noPlansForDay: '이 날에는 계획이 없습니다.',
     allSkipped: '모든 계획을 건너뛰었습니다',
-    highLoad: '계획량이 많습니다 (8시간 이상)',
+    highLoad: '일일 용량 초과: {planned} 계획 / {capacity} 용량',
     adjustPlan: '계획 조정',
     adjustPlanHint: '변경 사항은 이 날짜에만 적용됩니다.',
     pastReadOnly: '지난 계획은 읽기 전용입니다',
@@ -232,6 +233,8 @@ export const ko = {
     routine: '루틴',
     openRoutine: '{task} 루틴 열기',
     movedPlanHint: '이동된 계획은 원래 날짜에서 조정할 수 있습니다.',
+    moveTo: '이동할 날짜',
+    movePlan: '계획 이동',
   },
 
   notify: {
@@ -254,6 +257,13 @@ export const ko = {
         ko: '한국어',
         ja: '日本語',
       },
+    },
+    capacity: {
+      title: '일일 계획 용량',
+      desc: '투명한 하루 시간 예산으로 과도하게 계획된 날을 확인합니다.',
+      label: '하루 분량(분)',
+      range: '1~1440분으로 설정할 수 있습니다. 참고용 안내이며 계획을 차단하지 않습니다.',
+      validation: '용량은 1~1440분 사이의 정수여야 합니다.',
     },
     notifications: {
       timerDone: {

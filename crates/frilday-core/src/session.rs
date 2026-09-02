@@ -121,6 +121,7 @@ impl Session {
     }
 
     /// Rehydrate a session from durable lifecycle state.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_persisted(
         id: SessionId,
         routine_id: Option<RoutineId>,

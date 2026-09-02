@@ -18,7 +18,7 @@ import {
   setCompletion,
   setTaskActive,
 } from '../../infrastructure/storage';
-import { toYmd } from '../../shared/utils/date';
+import { isValidYmd, toYmd } from '../../shared/utils/date';
 import {
   createSerialQueue,
   type AsyncOperation,
@@ -93,10 +93,17 @@ interface FrilDayState {
   setPlanDurationOverride: (input: {
     taskId: string;
     date: string;
+    planId?: string;
     durationMinutes: number | null;
   }) => boolean;
   skipPlan: (input: { taskId: string; date: string }) => boolean;
-  restorePlan: (input: { taskId: string; date: string }) => boolean;
+  restorePlan: (input: { taskId: string; date: string; planId?: string }) => boolean;
+  movePlan: (input: {
+    taskId: string;
+    planId?: string;
+    fromDate: string;
+    destinationDate: string;
+  }) => boolean;
   setDailyMemo: (input: { taskId: string; date: string; text: string }) => void;
   startTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   pauseTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
@@ -151,7 +158,7 @@ function hasPlanHistory(
   state: Pick<FrilDayState, 'timeEntries' | 'completions'>,
   planId: string,
   taskId: string,
-  date: string,
+  ...dates: string[]
 ): boolean {
   return (
     state.timeEntries.some((entry) => entry.planId === planId) ||
@@ -160,8 +167,10 @@ function hasPlanHistory(
         completion.taskId === taskId &&
         (completion.planId === planId ||
           (completion.planId == null &&
-            completion.date === date &&
-            routinePlanId(taskId, date) === planId)),
+            dates.some(
+              (date) =>
+                completion.date === date && routinePlanId(taskId, date) === planId,
+            ))),
     )
   );
 }
@@ -236,7 +245,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   setFilter: (filter) => set({ filter }),
   clearError: () => set({ errorMsg: '' }),
 
-  setPlanDurationOverride: ({ taskId, date, durationMinutes }) => {
+  setPlanDurationOverride: ({ taskId, date, planId, durationMinutes }) => {
     const task = get().tasks.find((candidate) => candidate.id === taskId);
     if (!task) {
       set({ errorMsg: 'Task not found.' });
@@ -250,12 +259,28 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       return false;
     }
 
-    const id = routinePlanId(taskId, date);
+    const id = planId ?? routinePlanId(taskId, date);
     const current = get().plans.find((plan) => plan.id === id);
-    const hasHistory = hasPlanHistory(get(), id, taskId, date);
+    const sourceDate = current?.date ?? date;
+    const hasHistory = hasPlanHistory(
+      get(),
+      id,
+      taskId,
+      sourceDate,
+      ...(current?.movedToYmd ? [current.movedToYmd] : []),
+    );
     if (hasHistory) {
       set({ errorMsg: 'Historical plans cannot be changed.' });
       return false;
+    }
+    if (durationMinutes == null && current?.status === 'moved') {
+      const nextPlan = { ...current, durationOverrideMinutes: null };
+      set({
+        plans: [nextPlan, ...get().plans.filter((plan) => plan.id !== id)],
+        errorMsg: '',
+      });
+      persist(() => savePlan(nextPlan), 'Failed to restore plan.');
+      return true;
     }
     if (durationMinutes == null && current) {
       set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
@@ -263,14 +288,20 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       return true;
     }
     if (durationMinutes == null) return true;
-    const nextPlan = createRoutinePlan({
-      routineId: taskId,
-      date,
-      baselineDurationMinutes: current?.baselineDurationMinutes ?? task.durationMinutes,
-      durationOverrideMinutes: durationMinutes,
-      status: current?.status === 'skipped' ? 'planned' : current?.status,
-      movedToYmd: current?.movedToYmd,
-    });
+    const nextPlan = current
+      ? {
+          ...current,
+          durationOverrideMinutes: durationMinutes,
+          ...(current.status === 'skipped'
+            ? { status: 'planned' as const, movedToYmd: null }
+            : {}),
+        }
+      : createRoutinePlan({
+          routineId: taskId,
+          date,
+          baselineDurationMinutes: task.durationMinutes,
+          durationOverrideMinutes: durationMinutes,
+        });
     const nextPlans = [
       nextPlan,
       ...get().plans.filter((plan) => plan.id !== nextPlan.id),
@@ -308,19 +339,110 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     return true;
   },
 
-  restorePlan: ({ taskId, date }) => {
-    const id = routinePlanId(taskId, date);
+  restorePlan: ({ taskId, date, planId }) => {
+    const id = planId ?? routinePlanId(taskId, date);
     const current = get().plans.find((plan) => plan.id === id);
     if (!current) return true;
 
-    const hasHistory = hasPlanHistory(get(), id, taskId, date);
+    const hasHistory = hasPlanHistory(
+      get(),
+      id,
+      taskId,
+      current.date,
+      ...(current.movedToYmd ? [current.movedToYmd] : []),
+    );
     if (hasHistory) {
       set({ errorMsg: 'Historical plans cannot be changed.' });
       return false;
     }
 
+    if (current.status === 'moved') {
+      const nextPlan = { ...current, durationOverrideMinutes: null };
+      set({
+        plans: [nextPlan, ...get().plans.filter((plan) => plan.id !== id)],
+        errorMsg: '',
+      });
+      persist(() => savePlan(nextPlan), 'Failed to restore plan.');
+      return true;
+    }
+
     set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
     persist(() => deletePlan(id), 'Failed to restore plan.');
+    return true;
+  },
+
+  movePlan: ({ taskId, planId, fromDate, destinationDate }) => {
+    const task = get().tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      set({ errorMsg: 'Task not found.' });
+      return false;
+    }
+    if (!isValidYmd(fromDate) || !isValidYmd(destinationDate)) {
+      set({ errorMsg: 'Enter a valid calendar date.' });
+      return false;
+    }
+    if (fromDate === destinationDate) {
+      set({ errorMsg: 'Choose a different destination date.' });
+      return false;
+    }
+
+    const sourceId = routinePlanId(taskId, fromDate);
+    const current =
+      (planId != null ? get().plans.find((plan) => plan.id === planId) : undefined) ??
+      get().plans.find((plan) => plan.id === sourceId);
+    const sourcePlan =
+      current ??
+      createRoutinePlan({
+        routineId: taskId,
+        date: fromDate,
+        baselineDurationMinutes: task.durationMinutes,
+      });
+
+    if (sourcePlan.routineId !== taskId || sourcePlan.date !== fromDate) {
+      set({ errorMsg: 'The selected plan does not belong to this routine.' });
+      return false;
+    }
+
+    if (sourcePlan.status === 'skipped') {
+      set({ errorMsg: 'Skipped plans cannot be moved.' });
+      return false;
+    }
+    if (
+      hasPlanHistory(
+        get(),
+        sourcePlan.id,
+        taskId,
+        sourcePlan.date,
+        ...(sourcePlan.movedToYmd ? [sourcePlan.movedToYmd] : []),
+      )
+    ) {
+      set({ errorMsg: 'Historical plans cannot be changed.' });
+      return false;
+    }
+
+    const conflicts = get().plans.some(
+      (plan) =>
+        plan.id !== sourcePlan.id &&
+        plan.routineId === taskId &&
+        (plan.date === destinationDate || plan.movedToYmd === destinationDate),
+    );
+    if (conflicts) {
+      set({
+        errorMsg: 'This routine already has a plan on the destination date.',
+      });
+      return false;
+    }
+
+    const nextPlan = {
+      ...sourcePlan,
+      status: 'moved' as const,
+      movedToYmd: destinationDate,
+    };
+    set({
+      plans: [nextPlan, ...get().plans.filter((plan) => plan.id !== sourcePlan.id)],
+      errorMsg: '',
+    });
+    persist(() => savePlan(nextPlan), 'Failed to move plan.');
     return true;
   },
 

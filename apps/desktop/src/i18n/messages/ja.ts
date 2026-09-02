@@ -215,9 +215,10 @@ export const ja = {
     weekSummary: '予定日 {days}日 · 予定 {plans}件',
     planningHint: '時間予算を中心に週を計画します。ルーティンのデフォルトは変わりません。',
     durationHint: 'ここでの時間変更とスキップはこの日だけに適用されます。繰り返しのデフォルトはルーティンで管理します。',
+    capacity: '1日の予定上限: {duration}',
     noPlansForDay: 'この日の予定はありません。',
     allSkipped: 'すべての予定をスキップしました',
-    highLoad: '予定量が多い日です (8時間以上)',
+    highLoad: '1日の予定上限超過: {planned} / 上限 {capacity}',
     adjustPlan: '予定を調整',
     adjustPlanHint: '変更はこの日だけに適用されます。',
     pastReadOnly: '過去の予定は読み取り専用です',
@@ -233,6 +234,8 @@ export const ja = {
     routine: 'ルーティン',
     openRoutine: '{task} のルーティンを開く',
     movedPlanHint: '移動した予定は元の日付から調整できます。',
+    moveTo: '移動先の日付',
+    movePlan: '予定を移動',
   },
 
   notify: {
@@ -255,6 +258,13 @@ export const ja = {
         ko: '한국어',
         ja: '日本語',
       },
+    },
+    capacity: {
+      title: '1日の予定上限',
+      desc: '透明な時間予算で、予定を入れすぎた日を確認します。',
+      label: '1日の分数',
+      range: '1〜1440分で設定できます。あくまで目安で、計画を妨げません。',
+      validation: '上限は1〜1440分の整数で入力してください。',
     },
     notifications: {
       timerDone: {

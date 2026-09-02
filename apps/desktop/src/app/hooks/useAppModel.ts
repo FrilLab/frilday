@@ -9,6 +9,12 @@ import { useLocale } from '../../i18n/useLocale';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
 import {
+  DEFAULT_DAILY_CAPACITY_MINUTES,
+  MAX_DAILY_CAPACITY_MINUTES,
+  MIN_DAILY_CAPACITY_MINUTES,
+} from '../../domain/schedule/weeklyTimeBudget';
+import { platformSettings } from '../../infrastructure/platform';
+import {
   getCoreStatistics,
   getCoreTimeTotals,
   getRunningTaskIdWithCore,
@@ -43,6 +49,26 @@ const EMPTY_TIME_TOTALS: CoreTimeTotals = {
   byTask: [],
 };
 
+const DAILY_CAPACITY_SETTING_KEY = 'settings.planning.dailyCapacityMinutes';
+
+function parseDailyCapacity(value: unknown): number {
+  return Number.isInteger(value) &&
+    (value as number) >= MIN_DAILY_CAPACITY_MINUTES &&
+    (value as number) <= MAX_DAILY_CAPACITY_MINUTES
+    ? (value as number)
+    : DEFAULT_DAILY_CAPACITY_MINUTES;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error) || 'Unknown error';
+  } catch {
+    return 'Unknown error';
+  }
+}
+
 function monthStartYmd(ymd: string): string {
   return `${ymd.slice(0, 7)}-01`;
 }
@@ -67,6 +93,7 @@ export function useAppModel() {
     setPlanDurationOverride,
     skipPlan,
     restorePlan,
+    movePlan,
     setDailyMemo,
     startTimer,
     pauseTimer,
@@ -117,6 +144,24 @@ export function useAppModel() {
   const [statistics, setStatistics] = useState<CoreStatistics>(EMPTY_STATS);
   const [timeTotals, setTimeTotals] =
     useState<CoreTimeTotals>(EMPTY_TIME_TOTALS);
+  const [dailyPlanningCapacityMinutes, setDailyPlanningCapacityMinutes] =
+    useState(DEFAULT_DAILY_CAPACITY_MINUTES);
+
+  useEffect(() => {
+    let current = true;
+    void platformSettings
+      .get<number>(DAILY_CAPACITY_SETTING_KEY, DEFAULT_DAILY_CAPACITY_MINUTES)
+      .then((value) => {
+        if (current) setDailyPlanningCapacityMinutes(parseDailyCapacity(value));
+      })
+      .catch(() => {
+        // Keep the transparent default when settings are unavailable.
+      });
+
+    return () => {
+      current = false;
+    };
+  }, []);
 
   const openTimerEntry = useMemo(
     () => timeEntries.find((entry) => entry.endedAt == null) ?? null,
@@ -354,6 +399,25 @@ export function useAppModel() {
   const setError = (msg: string) =>
     useFrilDayStore.setState({ errorMsg: msg });
 
+  const setDailyPlanningCapacity = (minutes: number): boolean => {
+    if (
+      !Number.isInteger(minutes) ||
+      minutes < MIN_DAILY_CAPACITY_MINUTES ||
+      minutes > MAX_DAILY_CAPACITY_MINUTES
+    ) {
+      setError('Daily planning capacity must be a whole number from 1 to 1440 minutes.');
+      return false;
+    }
+
+    const previous = dailyPlanningCapacityMinutes;
+    setDailyPlanningCapacityMinutes(minutes);
+    void platformSettings.set(DAILY_CAPACITY_SETTING_KEY, minutes).catch((error) => {
+      setDailyPlanningCapacityMinutes(previous);
+      setError(`Failed to save daily planning capacity. ${formatError(error)}`);
+    });
+    return true;
+  };
+
   // Handlers
   const handleCreate = (input: CreateTaskInput) => {
     const created = createTask(input);
@@ -568,6 +632,7 @@ export function useAppModel() {
     todayStats: statistics.today,
     periodStats: statistics,
     todayTimeTotals: timeTotals,
+    dailyPlanningCapacityMinutes,
     taskDayStates,
     todayTasks,
     manageTasks,
@@ -575,6 +640,8 @@ export function useAppModel() {
     setPlanDurationOverride,
     skipPlan,
     restorePlan,
+    movePlan,
+    setDailyPlanningCapacity,
 
     // actions
     clearError,

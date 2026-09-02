@@ -863,12 +863,8 @@ fn plan_to_output(plan: &Plan) -> PlanOutput {
 
 fn session_from_input(input: &TimeEntryInput) -> Result<Session, String> {
     let started_at = Timestamp::from_unix_millis(input.started_at_millis);
-    let ended_at = input
-        .ended_at_millis
-        .map(|millis| Timestamp::from_unix_millis(millis));
-    let paused_at = input
-        .paused_at_millis
-        .map(|millis| Timestamp::from_unix_millis(millis));
+    let ended_at = input.ended_at_millis.map(Timestamp::from_unix_millis);
+    let paused_at = input.paused_at_millis.map(Timestamp::from_unix_millis);
     let active_started_at = input
         .active_started_at_millis
         .or_else(|| (ended_at.is_none() && paused_at.is_none()).then_some(input.started_at_millis))
