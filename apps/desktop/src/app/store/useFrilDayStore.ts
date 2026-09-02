@@ -259,7 +259,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     }
     if (durationMinutes == null && current) {
       set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
-      persist(() => deletePlan(id), 'Failed to restore today\'s plan.');
+      persist(() => deletePlan(id), 'Failed to restore plan.');
       return true;
     }
     if (durationMinutes == null) return true;
@@ -276,7 +276,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       ...get().plans.filter((plan) => plan.id !== nextPlan.id),
     ];
     set({ plans: nextPlans, errorMsg: '' });
-    persist(() => savePlan(nextPlan), 'Failed to update today\'s plan.');
+    persist(() => savePlan(nextPlan), 'Failed to update plan.');
     return true;
   },
 
@@ -304,7 +304,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       plans: [nextPlan, ...get().plans.filter((plan) => plan.id !== nextPlan.id)],
       errorMsg: '',
     });
-    persist(() => savePlan(nextPlan), 'Failed to skip today\'s plan.');
+    persist(() => savePlan(nextPlan), 'Failed to skip plan.');
     return true;
   },
 
@@ -320,7 +320,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     }
 
     set({ plans: get().plans.filter((plan) => plan.id !== id), errorMsg: '' });
-    persist(() => deletePlan(id), 'Failed to restore today\'s plan.');
+    persist(() => deletePlan(id), 'Failed to restore plan.');
     return true;
   },
 
