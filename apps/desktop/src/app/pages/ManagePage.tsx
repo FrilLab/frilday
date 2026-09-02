@@ -38,13 +38,16 @@ export function ManagePage(props: {
     taskId: string;
     title: string;
     description: string;
+    category: Task['category'];
+    durationMinutes: number;
     startYmd: string | null;
-    autoArchiveAfter: number | null;
-  }) => void;
+    completionLimit: number | null;
+    occurrenceLimit: number | null;
+    customDays: DayOfWeek[];
+  }) => boolean;
   onToggleToday: (task: Task) => void; // (role: toggle completion, type: (Task)=>void)
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onRestore: (taskId: string) => void; // (role: restore task, type: (string)=>void)
-  onDelete: (taskId: string) => void; // (role: delete task, type: (string)=>void)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
   onFinishTimer?: (task: Task) => void; // (role: finish timer, type: ((Task)=>void) | undefined)
@@ -74,7 +77,6 @@ export function ManagePage(props: {
     onToggleToday,
     onArchive,
     onRestore,
-    onDelete,
     onStartTimer,
     onStopTimer,
     onFinishTimer,
@@ -114,7 +116,7 @@ export function ManagePage(props: {
 
             <div>
               <label className="mb-1 block text-xs font-medium text-zinc-400">
-                {t('task.category')}
+              {t('task.recurrence')}
               </label>
               <div className="flex flex-wrap gap-2">
                 {(
@@ -208,19 +210,14 @@ export function ManagePage(props: {
             onToggleToday={onToggleToday}
             onArchive={onArchive}
             onRestore={onRestore}
-            onDelete={onDelete}
             onStartTimer={onStartTimer}
             onStopTimer={onStopTimer}
             onFinishTimer={onFinishTimer}
             onError={onError}
             taskDayStates={taskDayStates}
+            emptyMessage={t('task.noTasksScheduledManage')}
           />
 
-          {tasks.length === 0 && (
-            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-              {t('task.noTasksScheduledManage')}
-            </div>
-          )}
         </section>
       </main>
     </div>

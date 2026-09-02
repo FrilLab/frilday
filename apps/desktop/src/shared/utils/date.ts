@@ -8,6 +8,21 @@ export function toYmd(d: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// (role: calendar date validation, type: (string) => boolean)
+// Date inputs are business data, so a YYYY-MM-DD shape alone is not enough:
+// values such as 2026-02-30 must be rejected before they reach persistence.
+export function isValidYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 // (role: get DayOfWeek from local date, type: (Date) => DayOfWeek)
 export function dayOfWeek(d: Date): DayOfWeek {
   const idx = d.getDay(); // 0=Sun..6=Sat

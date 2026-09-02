@@ -134,7 +134,6 @@ export default function App() {
                 }
                 onArchive={m.archiveTask}
                 onRestore={m.handleRestore}
-                onDelete={m.handleDelete}
                 onError={m.setError}
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}

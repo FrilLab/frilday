@@ -19,7 +19,7 @@ export const CategorySchema = z.union([
   z.literal('custom'),
 ]);
 
-const AutoArchiveAfterSchema = z.preprocess((value) => {
+const CompletionLimitSchema = z.preprocess((value) => {
   if (value === '' || value == null) return null;
 
   const num =
@@ -33,7 +33,7 @@ const AutoArchiveAfterSchema = z.preprocess((value) => {
   return num;
 }, z.number().int().min(1).nullable());
 
-const RepeatCountSchema = z.preprocess((value) => {
+const OccurrenceLimitSchema = z.preprocess((value) => {
   if (value === '' || value == null) return null;
 
   const num =
@@ -70,14 +70,14 @@ const StartYmdSchema = z.preprocess((value) => {
 // (role: task schema, type: zod schema)
 export const TaskSchema = z.object({
   id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string().optional().default(''),
+  title: z.string().trim().min(1).max(80),
+  description: z.string().max(2000).optional().default(''),
   category: CategorySchema,
   daysOfWeek: z.array(DayOfWeekSchema).min(1),
   durationMinutes: z.number().int().min(1).max(720),
   startYmd: StartYmdSchema.optional().default(null),
-  autoArchiveAfter: AutoArchiveAfterSchema.optional().default(null),
-  repeatCount: RepeatCountSchema.optional().default(null),
+  completionLimit: CompletionLimitSchema.optional().default(null),
+  occurrenceLimit: OccurrenceLimitSchema.optional().default(null),
   isActive: z.boolean(),
   createdAt: IsoTimestampSchema,
 });

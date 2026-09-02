@@ -27,15 +27,18 @@ interface TaskListProps {
   onToggleToday: (task: Task) => void;
   onArchive: (taskId: string) => void;
   onRestore?: (taskId: string) => void;
-  onDelete?: (taskId: string) => void;
   onSaveMemo?: (input: { taskId: string; date: string; text: string }) => void;
   onUpdateTaskMeta?: (input: {
     taskId: string;
     title: string;
     description: string;
+    category: Task['category'];
+    durationMinutes: number;
     startYmd: string | null;
-    autoArchiveAfter: number | null;
-  }) => void;
+    completionLimit: number | null;
+    occurrenceLimit: number | null;
+    customDays: DayOfWeek[];
+  }) => boolean;
 
   onStartTimer: (task: Task) => void;
   onStopTimer: (task: Task) => void;
@@ -82,7 +85,6 @@ export function TaskList(props: TaskListProps) {
           onToggleToday={props.onToggleToday}
           onArchive={props.onArchive}
           onRestore={props.onRestore}
-          onDelete={props.onDelete}
           onSaveMemo={props.onSaveMemo}
           onUpdateTaskMeta={props.onUpdateTaskMeta}
           onStartTimer={props.onStartTimer}

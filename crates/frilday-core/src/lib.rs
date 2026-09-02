@@ -92,6 +92,28 @@ mod tests {
     }
 
     #[test]
+    fn completion_limit_does_not_silently_limit_future_occurrences() {
+        let mut routine = routine();
+        routine.set_completion_limit(Some(2)).unwrap();
+        let start = LocalDate::parse("2026-01-05").unwrap();
+
+        assert_eq!(
+            visible_dates_between(
+                &routine,
+                start,
+                start.checked_add_days(2).unwrap(),
+                LocalDate::parse("2026-01-01").unwrap(),
+                &[],
+            ),
+            vec![
+                start,
+                start.checked_add_days(1).unwrap(),
+                start.checked_add_days(2).unwrap()
+            ]
+        );
+    }
+
+    #[test]
     fn schedule_start_after_week_beginning_excludes_earlier_weekdays() {
         let mut routine = routine();
         routine.set_starts_on(Some(LocalDate::parse("2026-01-08").unwrap()));
