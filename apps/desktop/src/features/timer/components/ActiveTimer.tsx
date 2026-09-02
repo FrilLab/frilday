@@ -154,7 +154,8 @@ export function ActiveTimer(props: ActiveTimerProps) {
               <span
                 className="mt-2 font-mono text-5xl font-semibold tracking-tight text-zinc-50 sm:text-6xl"
                 role="timer"
-                aria-live="polite">
+                aria-live="off"
+                aria-label={`${showOvertime ? '+' : ''}${displayValue}`}>
                 {showOvertime ? '+' : ''}
                 {displayValue}
               </span>
@@ -182,7 +183,11 @@ export function ActiveTimer(props: ActiveTimerProps) {
           </div>
 
           {view.targetReached && (
-            <div className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100">
+            <div
+              className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true">
               <Flag size={18} className="mt-0.5 shrink-0 text-amber-300" />
               <p>
                 <span className="font-semibold">{t('timer.targetReached')}</span>
