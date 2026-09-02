@@ -386,6 +386,12 @@ export function useAppModel() {
           : null;
 
     if (currentTask && currentTask.id !== task.id) {
+      if (openTimerEntry?.pausedAt != null) {
+        setError(
+          t('timer.pausedSwitchBlocked', { current: currentTask.title }),
+        );
+        return;
+      }
       const shouldSwitch = window.confirm(
         t('timer.switchConfirm', {
           current: currentTask.title,

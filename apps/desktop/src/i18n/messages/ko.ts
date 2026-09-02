@@ -138,6 +138,8 @@ export const ko = {
     backToPlan: '계획으로 돌아가기',
     switchConfirm:
       '"{current}"에서 "{next}"로 전환할까요? 현재 세션을 중지하고 새 계획을 시작합니다.',
+    pausedSwitchBlocked:
+      '다른 세션을 시작하기 전에 "{current}" 세션을 재개하거나 마쳐 주세요.',
   },
 
   today: {
