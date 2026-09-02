@@ -101,6 +101,9 @@ export const TimeEntrySchema = z.object({
   date: YmdSchema,
   startedAt: IsoTimestampSchema,
   endedAt: IsoTimestampSchema.nullable(),
+  pausedAt: IsoTimestampSchema.nullable().optional().default(null),
+  activeStartedAt: IsoTimestampSchema.nullable().optional().default(null),
+  accumulatedMillis: z.number().int().min(0).optional().default(0),
   minutes: z.number().int().min(0),
 });
 

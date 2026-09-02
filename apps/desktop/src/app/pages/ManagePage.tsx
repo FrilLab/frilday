@@ -20,6 +20,7 @@ export function ManagePage(props: {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
 
   manageQuery: string; // (role: search query, type: string)
   setManageQuery: (v: string) => void; // (role: set query, type: (string)=>void)
@@ -60,6 +61,7 @@ export function ManagePage(props: {
     todayDow,
     nowIso,
     runningTaskId,
+    openTimerTaskId,
     manageQuery,
     setManageQuery,
     manageCategory,
@@ -201,6 +203,7 @@ export function ManagePage(props: {
             todayDow={todayDow}
             nowIso={nowIso}
             runningTaskId={runningTaskId}
+            openTimerTaskId={openTimerTaskId}
             onUpdateTaskMeta={onUpdateTaskMeta}
             onToggleToday={onToggleToday}
             onArchive={onArchive}

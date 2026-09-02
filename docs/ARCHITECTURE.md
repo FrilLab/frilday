@@ -46,9 +46,18 @@ persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
 
 The desktop Tauri adapter now translates the persisted `Task`, `Completion`,
 and `TimeEntry` shapes into core inputs for schedule visibility, completion
-transitions, session transitions, target-reached feedback, and statistics.
-SQLite storage remains an adapter concern; the React layer does not duplicate
-those rules.
+transitions, durable session lifecycle transitions, target-reached feedback,
+and statistics. SQLite
+schema, queries, typed writes, and legacy-data import live in the Rust-side
+desktop persistence adapter. React only calls typed Tauri persistence commands
+and never constructs application SQL or owns a full-table replacement.
+
+The existing localStorage collections (`dailycheck.tasks.v2`,
+`dailycheck.completions.v1`, `dailycheck.timeEntries.v1`, and
+`dailycheck.taskDailyMemos.v1`) are imported once into the existing
+`daily_check.db` file. The import is transactional and idempotent: corrupted
+legacy JSON is left in place for recovery, an existing SQLite dataset wins,
+and legacy keys are cleared only after the Rust adapter commits the migration.
 
 The stable Routine/Plan/Session/Completion vocabulary and the compatibility
 mapping for the current desktop records are defined in

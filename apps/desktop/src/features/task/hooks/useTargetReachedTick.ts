@@ -14,7 +14,10 @@ const TIMER_DONE_NOTIFY_KEY = 'settings.notifications.timerDone';
 export function useTargetReachedTick() {
   const { t } = useLocale();
   const hasRunningSession = useFrilDayStore((state) =>
-    state.timeEntries.some((timeEntry) => timeEntry.endedAt == null),
+    state.timeEntries.some(
+      (timeEntry) =>
+        timeEntry.endedAt == null && timeEntry.activeStartedAt != null,
+    ),
   );
   const notifiedSessionIds = useRef(new Set<string>());
   const inFlight = useRef(false);

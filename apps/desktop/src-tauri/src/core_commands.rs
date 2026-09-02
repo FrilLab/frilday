@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
     completion_count_for_routine, completion_stats_between, completion_stats_for_week,
-    eligible_dates_between, running_routine_id, start_session, stop_session_for_routine,
-    target_reached_sessions_at, toggle_routine_completion, visible_dates_between, Completion,
-    LocalDate, Plan, PlanId, PlannedDuration, Routine, RoutineCategory, RoutineId,
-    RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
+    eligible_dates_between, pause_session_for_routine, resume_session_for_routine,
+    running_routine_id, start_session, stop_session_for_routine, target_reached_sessions_at,
+    toggle_routine_completion, visible_dates_between, Completion, LocalDate, Plan, PlanId,
+    PlannedDuration, Routine, RoutineCategory, RoutineId, RoutineStatsTarget, ScheduleRule,
+    Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,8 +49,18 @@ pub struct TimeEntryInput {
     date: String,
     started_at: String,
     ended_at: Option<String>,
+    #[serde(default)]
+    paused_at: Option<String>,
+    #[serde(default)]
+    active_started_at: Option<String>,
+    #[serde(default)]
+    accumulated_millis: u64,
     started_at_millis: i64,
     ended_at_millis: Option<i64>,
+    #[serde(default)]
+    paused_at_millis: Option<i64>,
+    #[serde(default)]
+    active_started_at_millis: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +71,9 @@ pub struct TimeEntryOutput {
     date: String,
     started_at: String,
     ended_at: Option<String>,
+    paused_at: Option<String>,
+    active_started_at: Option<String>,
+    accumulated_millis: u64,
     minutes: u64,
 }
 
@@ -489,6 +503,78 @@ pub fn core_stop_timer(request: StopTimerRequest) -> Result<TimerOutput, String>
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PauseTimerRequest {
+    time_entries: Vec<TimeEntryInput>,
+    task_id: String,
+    date_ymd: String,
+    paused_at: String,
+    paused_at_millis: i64,
+}
+
+#[tauri::command]
+pub fn core_pause_timer(request: PauseTimerRequest) -> Result<TimerOutput, String> {
+    let date = parse_date(&request.date_ymd)?;
+    let routine_id = RoutineId::new(request.task_id).map_err(|error| error.to_string())?;
+    let sessions = request
+        .time_entries
+        .iter()
+        .map(session_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = pause_session_for_routine(
+        &sessions,
+        &routine_id,
+        date,
+        Timestamp::from_unix_millis(request.paused_at_millis),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(TimerOutput {
+        time_entries: sessions_to_outputs(
+            &next,
+            &request.time_entries,
+            &request.paused_at,
+            request.paused_at_millis,
+        ),
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeTimerRequest {
+    time_entries: Vec<TimeEntryInput>,
+    task_id: String,
+    date_ymd: String,
+    resumed_at: String,
+    resumed_at_millis: i64,
+}
+
+#[tauri::command]
+pub fn core_resume_timer(request: ResumeTimerRequest) -> Result<TimerOutput, String> {
+    let date = parse_date(&request.date_ymd)?;
+    let routine_id = RoutineId::new(request.task_id).map_err(|error| error.to_string())?;
+    let sessions = request
+        .time_entries
+        .iter()
+        .map(session_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = resume_session_for_routine(
+        &sessions,
+        &routine_id,
+        date,
+        Timestamp::from_unix_millis(request.resumed_at_millis),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(TimerOutput {
+        time_entries: sessions_to_outputs(
+            &next,
+            &request.time_entries,
+            &request.resumed_at,
+            request.resumed_at_millis,
+        ),
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetReachedRequest {
     tasks: Vec<TaskInput>,
     time_entries: Vec<TimeEntryInput>,
@@ -599,16 +685,35 @@ fn completion_to_output(completion: &Completion) -> Option<CompletionOutput> {
 }
 
 fn session_from_input(input: &TimeEntryInput) -> Result<Session, String> {
+    let started_at = Timestamp::from_unix_millis(input.started_at_millis);
     let ended_at = input
         .ended_at_millis
         .map(|millis| Timestamp::from_unix_millis(millis));
-    Session::new(
+    let paused_at = input
+        .paused_at_millis
+        .map(|millis| Timestamp::from_unix_millis(millis));
+    let active_started_at = input
+        .active_started_at_millis
+        .or_else(|| (ended_at.is_none() && paused_at.is_none()).then_some(input.started_at_millis))
+        .map(Timestamp::from_unix_millis);
+    let accumulated_millis = if input.accumulated_millis == 0 {
+        ended_at
+            .filter(|ended| *ended >= started_at)
+            .map(|ended| started_at.elapsed_millis_until(ended))
+            .unwrap_or(0)
+    } else {
+        input.accumulated_millis
+    };
+    Session::from_persisted(
         SessionId::new(input.id.clone()).map_err(|error| error.to_string())?,
         Some(routine_id_from_task(&input.task_id)?),
         None,
         parse_date(&input.date)?,
-        Timestamp::from_unix_millis(input.started_at_millis),
+        started_at,
         ended_at,
+        accumulated_millis,
+        active_started_at,
+        paused_at,
     )
     .map_err(|error| error.to_string())
 }
@@ -636,12 +741,25 @@ fn sessions_to_outputs(
                     .and_then(|input| input.ended_at.clone())
                     .unwrap_or_else(|| now_iso.to_owned())
             });
+            let paused_at = session.paused_at().map(|_| {
+                input
+                    .and_then(|input| input.paused_at.clone())
+                    .unwrap_or_else(|| now_iso.to_owned())
+            });
+            let active_started_at = session.active_started_at().map(|_| {
+                input
+                    .and_then(|input| input.active_started_at.clone())
+                    .unwrap_or_else(|| now_iso.to_owned())
+            });
             Some(TimeEntryOutput {
                 id: session.id().to_string(),
                 task_id,
                 date: session.date().to_string(),
                 started_at,
                 ended_at,
+                paused_at,
+                active_started_at,
+                accumulated_millis: session.accumulated_millis(),
                 minutes: session
                     .actual_duration_at(Timestamp::from_unix_millis(now_millis))
                     .minutes(),

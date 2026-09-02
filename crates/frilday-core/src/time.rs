@@ -58,8 +58,12 @@ impl Timestamp {
         self.0
     }
 
+    pub fn elapsed_millis_until(self, end: Self) -> u64 {
+        end.0.saturating_sub(self.0).max(0) as u64
+    }
+
     pub fn elapsed_minutes_until(self, end: Self) -> ActualDuration {
-        let elapsed_millis = end.0.saturating_sub(self.0).max(0) as u64;
+        let elapsed_millis = self.elapsed_millis_until(end);
         ActualDuration::from_minutes(elapsed_millis / 60_000)
     }
 }

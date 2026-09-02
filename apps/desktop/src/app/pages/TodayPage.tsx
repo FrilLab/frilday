@@ -1,6 +1,6 @@
 import { useContext } from 'react';
+import clsx from 'clsx';
 import { TaskList } from '../../features/task/components/TaskList';
-import { PeriodStatsPanel } from '../../features/statistics/components/PeriodStatsPanel';
 import type {
   Task,
   Completion,
@@ -13,6 +13,8 @@ import type {
   CoreTimeTotals,
 } from '../../infrastructure/tauri/core';
 import { LocaleContext } from '../../i18n/context';
+import { ActiveTimer } from '../../features/timer/components/ActiveTimer';
+import type { ActiveTimerPhase } from '../../features/timer/activeTimerModel';
 
 // (role: clamp helper, type: (number, number, number)=>number)
 function clamp(v: number, min: number, max: number): number {
@@ -52,7 +54,6 @@ export function TodayPage(props: {
   todayTasks: Task[]; // (role: tasks scheduled today, type: Task[])
 
   todayStats: CoreStatistics['today']; // (role: core-derived today stats, type: CoreStatistics['today'])
-  periodStats: CoreStatistics;
   todayTimeTotals: CoreTimeTotals;
   taskDayStates: ReadonlyMap<string, TaskDayState>;
 
@@ -61,6 +62,9 @@ export function TodayPage(props: {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
+  activeTimerTask: Task | null; // (role: selected execution task, type: Task | null)
+  activeTimerPhase: ActiveTimerPhase; // (role: execution phase, type: ActiveTimerPhase)
 
   getMemoText: (taskId: string, date: string) => string;
   onSaveMemo: (input: { taskId: string; date: string; text: string }) => void;
@@ -71,6 +75,9 @@ export function TodayPage(props: {
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
   onFinishTimer: (task: Task) => void; // (role: finish timer, type: (Task)=>void)
   targetReachedTaskIds: ReadonlySet<string>; // (role: tasks at planned target, type: ReadonlySet<string>)
+  onPauseTimer: (task: Task) => void; // (role: pause timer, type: (Task)=>void)
+  onResumeTimer: (task: Task) => void; // (role: resume timer, type: (Task)=>void)
+  onBackToPlan: () => void; // (role: leave finished timer, type: ()=>void)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
 }) {
   const { t } = useContext(LocaleContext);
@@ -80,7 +87,6 @@ export function TodayPage(props: {
     todayDow,
     todayTasks,
     todayStats,
-    periodStats,
     todayTimeTotals,
     taskDayStates,
 
@@ -88,6 +94,9 @@ export function TodayPage(props: {
     timeEntries,
     nowIso,
     runningTaskId,
+    openTimerTaskId,
+    activeTimerTask,
+    activeTimerPhase,
     getMemoText,
     onSaveMemo,
     onToggleToday,
@@ -96,6 +105,9 @@ export function TodayPage(props: {
     onStopTimer,
     onFinishTimer,
     targetReachedTaskIds,
+    onPauseTimer,
+    onResumeTimer,
+    onBackToPlan,
     onError,
   } = props;
 
@@ -108,178 +120,167 @@ export function TodayPage(props: {
       : clamp((spentMinutesToday / plannedMinutesToday) * 100, 0, 100);
 
   return (
-    <div className="grid gap-3 md:gap-4 xl:grid-cols-[360px_1fr] xl:items-start">
-      <aside className="min-w-0 xl:space-y-4 xl:sticky xl:top-6">
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <div className="mb-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-zinc-100">
-                  {t('common.today')}
-                </h2>
-                <p className="mt-1 hidden text-sm text-zinc-400 sm:block">
-                  {todayYmd} <span className="text-zinc-500">({todayDow})</span>
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4 hidden sm:block">
-              <div className="text-xs font-medium text-zinc-400">
-                {t('stats.scheduledToday')}
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-100">
-                {todayStats.scheduledCount}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4 hidden sm:block">
-              <div className="text-xs font-medium text-zinc-400">
-                {t('stats.done')}
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-100">
-                {todayStats.completedCount}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
-              <div className="text-xs font-medium text-zinc-400">
-                {t('common.completion')}
-              </div>
-
-              <div className="mt-2 flex items-end justify-between gap-3">
-                <div className="flex items-baseline gap-2">
-                  <div className="text-2xl font-semibold text-zinc-100">
-                    {todayStats.rate.toFixed(0)}%
-                  </div>
-                  <div className="text-xs text-zinc-500">
-                    ({todayStats.completedCount}/{todayStats.scheduledCount})
-                  </div>
-                </div>
-              </div>
-
-              <ProgressBar value={todayStats.rate} />
-            </div>
-          </div>
-        </section>
-
-        <section className="hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 xl:block">
-          <PeriodStatsPanel
-            stats={periodStats}
-          />
-        </section>
-      </aside>
-
-      <main className="min-w-0 space-y-4">
-        <section className="hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 md:block">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-xs font-medium text-zinc-400">
-                {t('common.time')}
-              </div>
-
-              <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <div className="text-2xl font-semibold text-zinc-100">
-                  {formatMinutes(spentMinutesToday, t)}
-                </div>
-                <div className="text-xs text-zinc-500">
-                  / {formatMinutes(plannedMinutesToday, t)}
-                </div>
-              </div>
-            </div>
-
-            <div className="shrink-0 text-sm font-semibold text-zinc-100">
-              {timeProgressPct.toFixed(0)}%
-            </div>
-          </div>
-
-          <ProgressBar value={timeProgressPct} />
-
-          <div className="mt-2 text-xs text-zinc-500">
-            {t('time.basedOnTodayPlannedMinutes')}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <div className="mb-3">
-            <h2 className="text-base font-semibold text-zinc-100">
-              {t('task.todayTasks')}
+    <div className="mx-auto max-w-5xl space-y-4">
+      <header className="rounded-3xl border border-zinc-800 bg-zinc-900/40 px-5 py-5 sm:px-7">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300/80">
+              {t('common.today')}
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">
+              {todayYmd}{' '}
+              <span className="text-zinc-500">({todayDow})</span>
             </h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              {t('task.todayTasksDescription')}
+            <p className="mt-2 text-sm text-zinc-400">
+              {activeTimerTask
+                ? t('today.activeExecutionHint')
+                : t('today.executionHint')}
             </p>
           </div>
 
-          <TaskList
-            variant="today"
-            tasks={todayTasks}
-            completions={completions}
-            timeEntries={timeEntries}
-            todayYmd={todayYmd}
-            todayDow={todayDow}
-            nowIso={nowIso}
-            runningTaskId={runningTaskId}
-            getMemoText={getMemoText}
-            onSaveMemo={onSaveMemo}
-            onToggleToday={onToggleToday}
-            onArchive={onArchive}
-            onStartTimer={onStartTimer}
-            onStopTimer={onStopTimer}
-            onFinishTimer={onFinishTimer}
-            onError={onError}
-            taskDayStates={taskDayStates}
-            targetReachedTaskIds={targetReachedTaskIds}
-          />
+          <div className="rounded-full border border-zinc-700 bg-zinc-950/50 px-3 py-1.5 text-sm text-zinc-300">
+            {todayStats.completedCount}/{todayStats.scheduledCount}{' '}
+            {t('stats.done')}
+          </div>
+        </div>
+      </header>
 
-          <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-400">
-            <summary className="cursor-pointer select-none text-zinc-300">
-              {t('keyboard.title')}
-            </summary>
-            <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-              <div className="flex items-center justify-between gap-3">
-                <dt>{t('keyboard.start')}</dt>
-                <dd>
-                  <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
-                    Alt + Shift + S
-                  </kbd>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt>{t('keyboard.pause')}</dt>
-                <dd>
-                  <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
-                    Alt + Shift + P
-                  </kbd>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt>{t('keyboard.finish')}</dt>
-                <dd>
-                  <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
-                    Alt + Shift + F
-                  </kbd>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <dt>{t('keyboard.today')}</dt>
-                <dd>
-                  <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
-                    Alt + Shift + T
-                  </kbd>
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-2 text-xs text-zinc-500">{t('keyboard.hint')}</p>
-          </details>
+      {activeTimerTask && (
+        <ActiveTimer
+          task={activeTimerTask}
+          timeEntries={timeEntries}
+          dateYmd={todayYmd}
+          nowIso={nowIso}
+          phase={activeTimerPhase}
+          onStart={() => onStartTimer(activeTimerTask)}
+          onPause={() => onPauseTimer(activeTimerTask)}
+          onResume={() => onResumeTimer(activeTimerTask)}
+          onFinish={() => onFinishTimer(activeTimerTask)}
+          onBackToPlan={onBackToPlan}
+        />
+      )}
 
-          {todayTasks.length === 0 && (
-            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-              {t('task.noTasksScheduledToday')}
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-900/40 px-5 py-5 sm:px-7">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {t('common.time')}
+            </p>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-2xl font-semibold text-zinc-50 sm:text-3xl">
+                {formatMinutes(spentMinutesToday, t)}
+              </span>
+              <span className="text-sm text-zinc-500">
+                / {formatMinutes(plannedMinutesToday, t)}
+              </span>
             </div>
-          )}
-        </section>
-      </main>
+          </div>
+
+          <div className="text-right">
+            <p className="text-xs text-zinc-500">{t('time.plannedVsActual')}</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-200">
+              {timeProgressPct.toFixed(0)}%
+            </p>
+          </div>
+        </div>
+
+        <ProgressBar value={timeProgressPct} />
+
+        <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-zinc-500">
+          <span>{t('time.trackedToday')}</span>
+          <span>
+            {todayStats.completedCount}/{todayStats.scheduledCount}{' '}
+            {t('stats.done')}
+          </span>
+        </div>
+      </section>
+
+      <section
+        className={clsx(
+          'rounded-3xl border border-zinc-800 bg-zinc-900/40 px-5 py-5 transition-opacity sm:px-7',
+          activeTimerTask && 'opacity-90',
+        )}>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100 sm:text-lg">
+              {t('task.todayTasks')}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              {activeTimerTask
+                ? t('task.todayTasksDuringExecution')
+                : t('task.todayTasksDescription')}
+            </p>
+          </div>
+          <span className="text-xs text-zinc-500">
+            {todayTasks.length} {t('task.plansToday')}
+          </span>
+        </div>
+
+        <TaskList
+          variant="today"
+          tasks={todayTasks}
+          completions={completions}
+          timeEntries={timeEntries}
+          todayYmd={todayYmd}
+          todayDow={todayDow}
+          nowIso={nowIso}
+          runningTaskId={runningTaskId}
+          openTimerTaskId={openTimerTaskId}
+          getMemoText={getMemoText}
+          onSaveMemo={onSaveMemo}
+          onToggleToday={onToggleToday}
+          onArchive={onArchive}
+          onStartTimer={onStartTimer}
+          onStopTimer={onStopTimer}
+          onFinishTimer={onFinishTimer}
+          onError={onError}
+          taskDayStates={taskDayStates}
+          targetReachedTaskIds={targetReachedTaskIds}
+          isExecutionFocused={Boolean(activeTimerTask)}
+          emptyMessage={t('task.noTasksScheduledToday')}
+        />
+
+        <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-400">
+          <summary className="cursor-pointer select-none text-zinc-300">
+            {t('keyboard.title')}
+          </summary>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.start')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + S
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.pause')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + P
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.finish')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + F
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.today')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + T
+                </kbd>
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-zinc-500">{t('keyboard.hint')}</p>
+        </details>
+      </section>
     </div>
   );
 }

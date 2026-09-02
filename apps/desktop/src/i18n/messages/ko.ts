@@ -36,8 +36,13 @@ export const ko = {
     schedule: '일정',
     days: '요일',
     plan: '계획',
+    planned: '계획',
+    actualTracked: '실제 기록',
     todaySpent: '오늘',
     todayTasksDescription: '오늘 일정에 포함된 작업만 표시됩니다.',
+    todayTasksDuringExecution:
+      '현재 세션에 집중하면서 아래에서 오늘 계획을 계속 확인할 수 있습니다.',
+    plansToday: '개 계획',
     manageTasks: '작업 관리',
     manageTasksDescription: '현재 필터가 적용된 작업 목록입니다.',
     filters: '필터',
@@ -94,6 +99,8 @@ export const ko = {
   time: {
     durationMin: '시간 (분)',
     basedOnTodayPlannedMinutes: '오늘 계획된 시간(분) 기준입니다.',
+    plannedVsActual: '실제 기록 / 계획',
+    trackedToday: '오늘 기록한 실제 시간',
     start: '시작',
     stop: '중지',
     pause: '일시정지',
@@ -116,6 +123,39 @@ export const ko = {
       Sat: '토',
       Sun: '일',
     },
+  },
+
+  timer: {
+    execution: '실행 중인 세션',
+    ready: '준비됨',
+    running: '실행 중',
+    paused: '일시정지',
+    finished: '완료됨',
+    planned: '계획 시간',
+    actual: '실제 시간',
+    remaining: '남은 시간',
+    overBy: '초과 시간',
+    overtime: '초과 실행',
+    targetReached: '계획 시간에 도달했습니다',
+    overtimeHint: '계속 작업하려면 추적을 이어가고, 마치려면 실제 시간을 저장하세요.',
+    progressLabel: '계획 시간 진행률',
+    progressPercent: '계획 시간의 {percent}%',
+    actualTrackedHint: '실제 시간은 세션 타임스탬프로 계산됩니다.',
+    finishedHint: '실제 시간이 저장되었습니다. 준비되면 오늘의 계획으로 돌아가세요.',
+    start: '타이머 시작',
+    pause: '일시정지',
+    resume: '재개',
+    finish: '마치기',
+    backToPlan: '계획으로 돌아가기',
+    switchConfirm:
+      '"{current}"에서 "{next}"로 전환할까요? 현재 세션을 중지하고 새 계획을 시작합니다.',
+    pausedSwitchBlocked:
+      '다른 세션을 시작하기 전에 "{current}" 세션을 재개하거나 마쳐 주세요.',
+  },
+
+  today: {
+    executionHint: '준비되면 다음 계획을 바로 시작하세요.',
+    activeExecutionHint: '현재 계획에 집중하세요. 실제 시간이 기록되고 있습니다.',
   },
 
   period: {

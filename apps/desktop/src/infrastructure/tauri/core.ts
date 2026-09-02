@@ -28,8 +28,13 @@ type CoreTimeEntryInput = {
   date: string;
   startedAt: string;
   endedAt: string | null;
+  pausedAt: string | null;
+  activeStartedAt: string | null;
+  accumulatedMillis: number;
   startedAtMillis: number;
   endedAtMillis: number | null;
+  pausedAtMillis: number | null;
+  activeStartedAtMillis: number | null;
 };
 
 export type CoreScheduleSlot = {
@@ -82,7 +87,6 @@ export type CoreTargetReachedResult = {
     plannedMinutes: number;
   }>;
 };
-
 function assertFiniteMillis(value: string, field: string): number {
   const millis = new Date(value).getTime();
   if (!Number.isFinite(millis)) {
@@ -120,11 +124,22 @@ function toCoreTimeEntry(entry: TimeEntry): CoreTimeEntryInput {
     date: entry.date,
     startedAt: entry.startedAt,
     endedAt: entry.endedAt,
+    pausedAt: entry.pausedAt,
+    activeStartedAt: entry.activeStartedAt,
+    accumulatedMillis: entry.accumulatedMillis,
     startedAtMillis: assertFiniteMillis(entry.startedAt, 'startedAt'),
     endedAtMillis:
       entry.endedAt == null
         ? null
         : assertFiniteMillis(entry.endedAt, 'endedAt'),
+    pausedAtMillis:
+      entry.pausedAt == null
+        ? null
+        : assertFiniteMillis(entry.pausedAt, 'pausedAt'),
+    activeStartedAtMillis:
+      entry.activeStartedAt == null
+        ? null
+        : assertFiniteMillis(entry.activeStartedAt, 'activeStartedAt'),
   };
 }
 
@@ -256,4 +271,38 @@ export async function getTargetReachedWithCore(input: {
     nowIso: input.nowIso,
     nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),
   });
+}
+
+export async function pauseTimerWithCore(input: {
+  timeEntries: TimeEntry[];
+  taskId: string;
+  dateYmd: string;
+  pausedAt: string;
+}): Promise<TimeEntry[]> {
+  return (
+    await invokeCore<{ timeEntries: TimeEntry[] }>('core_pause_timer', {
+      timeEntries: input.timeEntries.map(toCoreTimeEntry),
+      taskId: input.taskId,
+      dateYmd: input.dateYmd,
+      pausedAt: input.pausedAt,
+      pausedAtMillis: assertFiniteMillis(input.pausedAt, 'pausedAt'),
+    })
+  ).timeEntries;
+}
+
+export async function resumeTimerWithCore(input: {
+  timeEntries: TimeEntry[];
+  taskId: string;
+  dateYmd: string;
+  resumedAt: string;
+}): Promise<TimeEntry[]> {
+  return (
+    await invokeCore<{ timeEntries: TimeEntry[] }>('core_resume_timer', {
+      timeEntries: input.timeEntries.map(toCoreTimeEntry),
+      taskId: input.taskId,
+      dateYmd: input.dateYmd,
+      resumedAt: input.resumedAt,
+      resumedAtMillis: assertFiniteMillis(input.resumedAt, 'resumedAt'),
+    })
+  ).timeEntries;
 }

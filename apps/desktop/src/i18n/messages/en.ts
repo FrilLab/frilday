@@ -36,8 +36,13 @@ export const en = {
     schedule: 'Schedule',
     days: 'Days',
     plan: 'Plan',
+    planned: 'Planned',
+    actualTracked: 'Tracked',
     todaySpent: 'Today',
     todayTasksDescription: 'Only tasks scheduled for today are shown here.',
+    todayTasksDuringExecution:
+      'The current session stays in focus while today’s plan remains available below.',
+    plansToday: 'plans',
     manageTasks: 'Manage tasks',
     manageTasksDescription: 'Your tasks list with the current filters.',
     filters: 'Filters',
@@ -94,6 +99,8 @@ export const en = {
   time: {
     durationMin: 'Duration (min)',
     basedOnTodayPlannedMinutes: "Based on today's planned minutes.",
+    plannedVsActual: 'Tracked / planned',
+    trackedToday: 'Actual time tracked today',
     start: 'Start',
     stop: 'Stop',
     pause: 'Pause',
@@ -116,6 +123,40 @@ export const en = {
       Sat: 'Sat',
       Sun: 'Sun',
     },
+  },
+
+  timer: {
+    execution: 'Active session',
+    ready: 'Ready',
+    running: 'Running',
+    paused: 'Paused',
+    finished: 'Finished',
+    planned: 'Planned',
+    actual: 'Actual',
+    remaining: 'Remaining',
+    overBy: 'Over by',
+    overtime: 'Overtime',
+    targetReached: 'Planned target reached',
+    overtimeHint: 'Keep tracking if the work continues, or finish to save actual time.',
+    progressLabel: 'Planned time progress',
+    progressPercent: '{percent}% of planned time',
+    actualTrackedHint: 'Actual time is calculated from session timestamps.',
+    finishedHint: 'Actual time is committed. Continue from today’s plan when you are ready.',
+    start: 'Start timer',
+    pause: 'Pause',
+    resume: 'Resume',
+    finish: 'Finish',
+    backToPlan: 'Back to plan',
+    switchConfirm:
+      'Switch from "{current}" to "{next}"? The current session will be stopped and the new plan will start.',
+    pausedSwitchBlocked:
+      'Resume or finish "{current}" before starting another session.',
+  },
+
+  today: {
+    executionHint: 'Start the next plan when you are ready.',
+    activeExecutionHint:
+      'Stay with the current plan. Its actual time is updating now.',
   },
 
   period: {

@@ -49,6 +49,8 @@ mock.module('@tauri-apps/api/core', () => ({
         return 'task-1';
       case 'core_start_timer':
       case 'core_stop_timer':
+      case 'core_pause_timer':
+      case 'core_resume_timer':
         return { timeEntries: [] };
       case 'core_target_reached':
         return { tasks: [] };
@@ -69,6 +71,8 @@ const {
   getRunningTaskIdWithCore,
   getVisibleScheduleSlots,
   getTargetReachedWithCore,
+  pauseTimerWithCore,
+  resumeTimerWithCore,
   startTimerWithCore,
   stopTimerWithCore,
   toggleCompletionWithCore,
@@ -127,7 +131,26 @@ describe('desktop core adapter', () => {
       nowIso: '2026-01-05T10:00:00.000Z',
       taskIds: [task.id],
     });
-    await getRunningTaskIdWithCore([]);
+    await getRunningTaskIdWithCore([
+      {
+        id: 'session-1',
+        taskId: task.id,
+        date: '2026-01-05',
+        startedAt: '2026-01-05T10:00:00.000Z',
+        endedAt: null,
+        pausedAt: '2026-01-05T10:10:00.000Z',
+        activeStartedAt: null,
+        accumulatedMillis: 10 * 60 * 1000,
+        minutes: 10,
+      },
+    ]);
+    expect(
+      (calls[3]?.request.timeEntries as Array<Record<string, unknown>>)[0],
+    ).toMatchObject({
+      pausedAt: '2026-01-05T10:10:00.000Z',
+      accumulatedMillis: 10 * 60 * 1000,
+      pausedAtMillis: Date.parse('2026-01-05T10:10:00.000Z'),
+    });
     await startTimerWithCore({
       timeEntries: [],
       sessionId: 'session-1',
@@ -141,10 +164,22 @@ describe('desktop core adapter', () => {
       dateYmd: '2026-01-05',
       endedAt: '2026-01-05T10:01:00.000Z',
     });
+    await pauseTimerWithCore({
+      timeEntries: [],
+      taskId: task.id,
+      dateYmd: '2026-01-05',
+      pausedAt: '2026-01-05T10:01:00.000Z',
+    });
+    await resumeTimerWithCore({
+      timeEntries: [],
+      taskId: task.id,
+      dateYmd: '2026-01-05',
+      resumedAt: '2026-01-05T10:02:00.000Z',
+    });
     await getTargetReachedWithCore({
       tasks: [task],
       timeEntries: [],
-      nowIso: '2026-01-05T10:01:00.000Z',
+      nowIso: '2026-01-05T10:03:00.000Z',
     });
 
     expect(calls.map((call) => call.command)).toEqual([
@@ -154,6 +189,8 @@ describe('desktop core adapter', () => {
       'core_running_task_id',
       'core_start_timer',
       'core_stop_timer',
+      'core_pause_timer',
+      'core_resume_timer',
       'core_target_reached',
     ]);
   });

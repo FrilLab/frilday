@@ -6,6 +6,7 @@ import type {
   TaskDayState,
   TimeEntry,
 } from '../types';
+import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
 import { TaskListItem } from './TaskListItem';
 
@@ -18,6 +19,7 @@ interface TaskListProps {
 
   nowIso: string; // (role: ui clock iso, type: string)
   runningTaskId: string | null; // (role: single running task id, type: string | null)
+  openTimerTaskId: string | null; // (role: running or paused task id, type: string | null)
 
   getMemoText?: (taskId: string, date: string) => string;
 
@@ -42,6 +44,8 @@ interface TaskListProps {
   onError: (msg: string) => void;
   taskDayStates: ReadonlyMap<string, TaskDayState>;
   targetReachedTaskIds?: ReadonlySet<string>;
+  isExecutionFocused?: boolean;
+  emptyMessage?: string;
 }
 
 export function TaskList(props: TaskListProps) {
@@ -51,13 +55,17 @@ export function TaskList(props: TaskListProps) {
   if (tasks.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-        {t('task.noTasks')}
+        {props.emptyMessage ?? t('task.noTasks')}
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className={clsx(
+        'space-y-2 transition-opacity',
+        props.isExecutionFocused && 'opacity-75',
+      )}>
       {tasks.map((t) => (
         <TaskListItem
           key={t.id}
@@ -69,6 +77,7 @@ export function TaskList(props: TaskListProps) {
           todayDow={props.todayDow}
           nowIso={props.nowIso}
           runningTaskId={props.runningTaskId}
+          openTimerTaskId={props.openTimerTaskId}
           variant={props.variant}
           onToggleToday={props.onToggleToday}
           onArchive={props.onArchive}
@@ -82,6 +91,7 @@ export function TaskList(props: TaskListProps) {
           onError={props.onError}
           taskDayState={props.taskDayStates.get(t.id)}
           targetReached={props.targetReachedTaskIds?.has(t.id) ?? false}
+          isExecutionFocused={props.isExecutionFocused}
         />
       ))}
     </div>

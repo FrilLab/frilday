@@ -67,16 +67,6 @@ export default function App() {
                 <h1 className="text-2xl font-semibold tracking-tight">
                   FrilDay
                 </h1>
-
-                <div className="mb-3 block sm:hidden">
-                  <h2 className="text-base font-semibold text-zinc-100">
-                    {t('common.today')}
-                  </h2>
-                  <p className="mt-1 text-sm text-zinc-400">
-                    {m.todayYmd}{' '}
-                    <span className="text-zinc-500">({m.todayDow})</span>
-                  </p>
-                </div>
               </div>
 
               <div className="md:pt-1">
@@ -98,13 +88,15 @@ export default function App() {
                 todayDow={m.todayDow}
                 todayTasks={m.todayTasks}
                 todayStats={m.todayStats}
-                periodStats={m.periodStats}
                 todayTimeTotals={m.todayTimeTotals}
                 taskDayStates={m.taskDayStates}
                 completions={m.completions}
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                openTimerTaskId={m.openTimerTaskId}
+                activeTimerTask={m.activeTimerTask}
+                activeTimerPhase={m.activeTimerPhase}
                 getMemoText={m.getMemoText}
                 onSaveMemo={m.handleSaveDailyMemo}
                 onToggleToday={(task: Task) =>
@@ -114,8 +106,11 @@ export default function App() {
                 onError={m.setError}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
+                onPauseTimer={m.handlePauseTimer}
+                onResumeTimer={m.handleResumeTimer}
                 onFinishTimer={m.handleFinishTimer}
                 targetReachedTaskIds={m.targetReachedTaskIds}
+                onBackToPlan={m.handleBackToPlan}
               />
             )}
 
@@ -144,6 +139,7 @@ export default function App() {
                 timeEntries={m.timeEntries}
                 nowIso={m.nowIso}
                 runningTaskId={m.runningTaskId}
+                openTimerTaskId={m.openTimerTaskId}
                 taskDayStates={m.taskDayStates}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
