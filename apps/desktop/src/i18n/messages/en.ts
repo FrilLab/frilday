@@ -222,6 +222,7 @@ export const en = {
     highLoad: 'High planned load (8h or more)',
     adjustPlan: 'Adjust plan',
     adjustPlanHint: 'Changes apply to this date only.',
+    pastReadOnly: 'Past plans are read-only',
     plannedDurationFor: 'Planned duration for {task}',
     restorePlan: 'Restore plan',
     restoreRoutinePlan: 'Use routine default',

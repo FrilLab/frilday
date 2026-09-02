@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import type { Completion, Plan, Task } from '../../shared/types';
 import {
   buildWeeklyTimeBudget,
+  canAdjustPlanDate,
   totalPlannedMinutes,
   type WeeklyDayBudget,
   type WeeklyPlanItem,
@@ -297,6 +298,7 @@ function WeeklyLoadOverview(props: {
 
 function DayBudgetCard(props: {
   day: WeeklyDayBudget;
+  todayYmd: string;
   t: (key: string, params?: Record<string, string | number>) => string;
   onOpenTask?: (taskId: string) => void;
   onSetPlanDuration?: PlanMutation;
@@ -305,6 +307,7 @@ function DayBudgetCard(props: {
 }) {
   const {
     day,
+    todayYmd,
     t,
     onOpenTask,
     onSetPlanDuration,
@@ -314,6 +317,7 @@ function DayBudgetCard(props: {
   const [adjustingKey, setAdjustingKey] = useState<string | null>(null);
   const skippedCount = day.plans.filter((item) => !item.plan.executable).length;
   const allSkipped = day.plans.length > 0 && skippedCount === day.plans.length;
+  const canAdjustDate = canAdjustPlanDate(day.dateYmd, todayYmd);
 
   return (
     <article
@@ -448,6 +452,7 @@ function DayBudgetCard(props: {
                       </button>
                     )}
                     {!isMoved &&
+                      canAdjustDate &&
                       (onSetPlanDuration || onSkipPlan || onRestorePlan) && (
                         <button
                           type="button"
@@ -460,10 +465,17 @@ function DayBudgetCard(props: {
                           {t('schedule.adjustPlan')}
                         </button>
                       )}
+                    {!isMoved &&
+                      !canAdjustDate &&
+                      (onSetPlanDuration || onSkipPlan || onRestorePlan) && (
+                        <span className="rounded-lg border border-zinc-800 px-2 py-1 text-[11px] text-zinc-600">
+                          {t('schedule.pastReadOnly')}
+                        </span>
+                      )}
                   </div>
                 </div>
 
-                {isAdjusting && (
+                {isAdjusting && canAdjustDate && !isMoved && (
                   <PlanAdjustment
                     item={item}
                     onClose={() => setAdjustingKey(null)}
@@ -486,6 +498,7 @@ export function SchedulePage(props: {
   completions: Completion[];
   plans: Plan[];
   weekStartYmd: string;
+  todayYmd: string;
   getMemoText?: (taskId: string, date: string) => string;
   onOpenTask?: (taskId: string) => void;
   onSetPlanDuration?: PlanMutation;
@@ -498,6 +511,7 @@ export function SchedulePage(props: {
     completions,
     plans,
     weekStartYmd,
+    todayYmd,
     getMemoText,
     onOpenTask,
     onSetPlanDuration,
@@ -625,6 +639,7 @@ export function SchedulePage(props: {
           <DayBudgetCard
             key={day.dateYmd}
             day={day}
+            todayYmd={todayYmd}
             t={t}
             onOpenTask={onOpenTask}
             onSetPlanDuration={onSetPlanDuration}

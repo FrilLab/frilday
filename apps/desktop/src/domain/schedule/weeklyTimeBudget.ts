@@ -39,6 +39,14 @@ export type WeeklyDayBudget = {
   overloaded: boolean;
 };
 
+/**
+ * Past weekly plans are historical context in the planner and cannot be
+ * adjusted from this view. YYYY-MM-DD strings sort chronologically.
+ */
+export function canAdjustPlanDate(dateYmd: string, todayYmd: string): boolean {
+  return dateYmd >= todayYmd;
+}
+
 function isCompletionForPlan(
   completions: Completion[],
   item: WeeklyPlanItem,

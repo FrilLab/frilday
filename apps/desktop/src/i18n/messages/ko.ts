@@ -219,6 +219,7 @@ export const ko = {
     highLoad: '계획량이 많습니다 (8시간 이상)',
     adjustPlan: '계획 조정',
     adjustPlanHint: '변경 사항은 이 날짜에만 적용됩니다.',
+    pastReadOnly: '지난 계획은 읽기 전용입니다',
     plannedDurationFor: '{task} 계획 시간',
     restorePlan: '계획 복원',
     restoreRoutinePlan: '루틴 기본값 사용',

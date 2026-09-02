@@ -220,6 +220,7 @@ export const ja = {
     highLoad: '予定量が多い日です (8時間以上)',
     adjustPlan: '予定を調整',
     adjustPlanHint: '変更はこの日だけに適用されます。',
+    pastReadOnly: '過去の予定は読み取り専用です',
     plannedDurationFor: '{task} の予定時間',
     restorePlan: '予定を復元',
     restoreRoutinePlan: 'ルーティンのデフォルトを使用',

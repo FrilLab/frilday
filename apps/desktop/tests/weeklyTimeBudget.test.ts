@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildWeeklyTimeBudget,
+  canAdjustPlanDate,
   totalPlannedMinutes,
   type WeeklyPlanProjection,
   type WeeklyScheduleSlot,
@@ -62,6 +63,12 @@ const weekDates = [
 ];
 
 describe('weekly time budget projection', () => {
+  test('allows Plan adjustments only for today and future dates', () => {
+    expect(canAdjustPlanDate('2026-01-04', '2026-01-05')).toBe(false);
+    expect(canAdjustPlanDate('2026-01-05', '2026-01-05')).toBe(true);
+    expect(canAdjustPlanDate('2026-01-06', '2026-01-05')).toBe(true);
+  });
+
   test('sums effective Plan durations by day and across the week', () => {
     const days = buildWeeklyTimeBudget({
       tasks: [task],

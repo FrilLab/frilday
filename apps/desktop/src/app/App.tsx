@@ -157,6 +157,7 @@ export default function App() {
                 plans={m.plans}
                 getMemoText={m.getMemoText}
                 weekStartYmd={scheduleWeekStartYmd}
+                todayYmd={m.todayYmd}
                 onOpenTask={() => m.setTab('manage')}
                 onSetPlanDuration={m.setPlanDurationOverride}
                 onSkipPlan={m.skipPlan}
