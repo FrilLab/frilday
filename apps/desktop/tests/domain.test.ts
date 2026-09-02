@@ -43,6 +43,22 @@ mock.module('@tauri-apps/api/core', () => ({
           allStartYmd: '2026-01-05',
           weekEndYmd: '2026-01-11',
         };
+      case 'core_review':
+        return {
+          startDate: '2026-01-05',
+          endDate: '2026-01-11',
+          totals: {
+            plannedMinutes: 30,
+            actualMinutes: 45,
+            varianceMinutes: 15,
+            executionRatio: 1.5,
+            plannedOccurrences: 1,
+            completedOccurrences: 1,
+            unplannedActualMinutes: 0,
+          },
+          routines: [],
+          days: [],
+        };
       case 'core_time_totals':
         return { plannedMinutes: 30, actualMinutes: 90, byTask: [] };
       case 'core_running_task_id':
@@ -66,6 +82,7 @@ Object.assign(globalThis, {
 });
 
 const {
+  getCoreReview,
   getCoreStatistics,
   getCoreTimeTotals,
   getRunningTaskIdWithCore,
@@ -224,5 +241,30 @@ describe('desktop core adapter', () => {
 
     expect(result.tasks).toEqual([]);
     expect(calls[0]?.command).toBe('core_target_reached');
+  });
+
+  test('routes planned-vs-actual review through the core adapter', async () => {
+    const result = await getCoreReview({
+      tasks: [task],
+      completions: [],
+      plans: [],
+      timeEntries: [],
+      startYmd: '2026-01-05',
+      endYmd: '2026-01-11',
+      nowIso: '2026-01-11T10:00:00.000Z',
+    });
+
+    expect(result.totals).toMatchObject({
+      plannedMinutes: 30,
+      actualMinutes: 45,
+      varianceMinutes: 15,
+      executionRatio: 1.5,
+    });
+    expect(calls[0]?.command).toBe('core_review');
+    expect(calls[0]?.request).toMatchObject({
+      startYmd: '2026-01-05',
+      endYmd: '2026-01-11',
+      nowMillis: Date.parse('2026-01-11T10:00:00.000Z'),
+    });
   });
 });

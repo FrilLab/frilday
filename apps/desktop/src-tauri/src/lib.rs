@@ -30,6 +30,7 @@ pub fn run() {
             core_commands::core_virtual_plan_exists,
             core_commands::core_toggle_completion,
             core_commands::core_statistics,
+            core_commands::core_review,
             core_commands::core_time_totals,
             core_commands::core_running_task_id,
             core_commands::core_start_timer,

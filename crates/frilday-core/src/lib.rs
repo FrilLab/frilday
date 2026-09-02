@@ -9,6 +9,7 @@ pub mod date;
 pub mod ids;
 pub mod plan;
 pub mod planning;
+pub mod review;
 pub mod routine;
 pub mod schedule;
 pub mod session;
@@ -24,6 +25,10 @@ pub use date::{DateError, LocalDate, Weekday};
 pub use ids::{IdError, PlanId, RoutineId, SessionId};
 pub use plan::{Plan, PlanError, PlanStatus};
 pub use planning::{RoutinePlanTarget, has_virtual_plan_on_date, resolve_plan, resolve_plans};
+pub use review::{
+    ReviewDay, ReviewPeriod, ReviewTotals, RoutineReview, review_for_date, review_for_range,
+    review_for_week,
+};
 pub use routine::{Routine, RoutineError};
 pub use schedule::{
     CustomSchedule, ScheduleError, ScheduleRule, completed_dates_between, effective_start_on,

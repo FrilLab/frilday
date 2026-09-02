@@ -26,6 +26,7 @@ pub fn resolve_plan(
         return Some(plan.clone());
     }
 
+    let plan_id = Plan::id_for_routine(target.routine.id(), date);
     let visible = visible_dates_between(
         target.routine,
         date,
@@ -33,12 +34,15 @@ pub fn resolve_plan(
         target.created_local_date,
         completions,
     );
-    visible.contains(&date).then(|| {
+    let has_plan_completion = completions
+        .iter()
+        .any(|completion| completion.matches_plan_on(&plan_id, date));
+    (visible.contains(&date) || has_plan_completion).then(|| {
         // A completion can be the only evidence that a historical Plan
         // existed after a schedule/archive change. Preserve that history
         // with the Routine duration available at resolution time.
         Plan::new(
-            Plan::id_for_routine(target.routine.id(), date),
+            plan_id,
             Some(target.routine.id().clone()),
             date,
             target.routine.planned_duration(),
@@ -56,14 +60,7 @@ pub fn has_virtual_plan_on_date(
     completions: &[Completion],
     date: LocalDate,
 ) -> bool {
-    visible_dates_between(
-        target.routine,
-        date,
-        date,
-        target.created_local_date,
-        completions,
-    )
-    .contains(&date)
+    resolve_plan(target, date, completions, None).is_some()
 }
 
 /// Resolve all Plans in an inclusive range without producing duplicates.
