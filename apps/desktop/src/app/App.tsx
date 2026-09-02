@@ -8,6 +8,7 @@ import { ManagePage } from './pages/ManagePage';
 import { SchedulePage } from './pages/SchedulePage';
 
 import { useAppModel } from './hooks/useAppModel';
+import { useTargetReachedTick } from '../features/task/hooks/useTargetReachedTick';
 
 import type { Task } from '../shared/types';
 
@@ -16,14 +17,30 @@ import { initNotifier } from './bootstrap/initNotifier';
 import { startOfWeekMonday, toYmd } from '../shared/utils/date';
 import { LocaleContext } from '../i18n/context';
 import { SettingsPage } from './pages/SettingsPage';
+import { useTimerKeyboardShortcuts } from '../features/task/hooks/useTimerKeyboardShortcuts';
 
 // Toast
 // NOTE: Initializing outside App prevents re-init on every render.
 initNotifier();
 
 export default function App() {
+  // (role: app-wide target feedback tick, type: () => void)
+  useTargetReachedTick();
+
   const m = useAppModel();
   const { t } = useContext(LocaleContext);
+
+  useTimerKeyboardShortcuts({
+    tab: m.tab,
+    setTab: m.setTab,
+    todayTasks: m.todayTasks,
+    taskDayStates: m.taskDayStates,
+    runningTaskId: m.runningTaskId,
+    onStartTimer: m.handleStartTimer,
+    onPauseTimer: m.handleStopTimer,
+    onFinishTimer: m.handleFinishTimer,
+    t,
+  });
 
   // (role: schedule view week start (Monday), type: string (YYYY-MM-DD))
   const scheduleWeekStartYmd = useMemo(() => {
@@ -92,6 +109,7 @@ export default function App() {
                 onPauseTimer={m.handlePauseTimer}
                 onResumeTimer={m.handleResumeTimer}
                 onFinishTimer={m.handleFinishTimer}
+                targetReachedTaskIds={m.targetReachedTaskIds}
                 onBackToPlan={m.handleBackToPlan}
               />
             )}
@@ -125,6 +143,7 @@ export default function App() {
                 taskDayStates={m.taskDayStates}
                 onStartTimer={m.handleStartTimer}
                 onStopTimer={m.handleStopTimer}
+                onFinishTimer={m.handleFinishTimer}
               />
             )}
 

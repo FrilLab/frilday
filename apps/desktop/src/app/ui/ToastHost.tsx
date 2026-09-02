@@ -58,6 +58,9 @@ export function ToastHost(props: {
   return (
     <div className="fixed bottom-4 left-1/2 z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2">
       <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
         className={[
           'rounded-2xl border px-4 py-3 text-sm text-zinc-100 shadow-lg backdrop-blur',
           border,

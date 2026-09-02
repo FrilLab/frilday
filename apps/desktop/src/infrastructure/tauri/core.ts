@@ -78,6 +78,15 @@ export type CoreTimeTotals = {
   byTask: Array<{ taskId: string; actualMinutes: number }>;
 };
 
+export type CoreTargetReachedResult = {
+  tasks: Array<{
+    sessionId: string;
+    taskId: string;
+    title: string;
+    actualMinutes: number;
+    plannedMinutes: number;
+  }>;
+};
 function assertFiniteMillis(value: string, field: string): number {
   const millis = new Date(value).getTime();
   if (!Number.isFinite(millis)) {
@@ -249,6 +258,19 @@ export async function stopTimerWithCore(input: {
       endedAtMillis: assertFiniteMillis(input.endedAt, 'endedAt'),
     })
   ).timeEntries;
+}
+
+export async function getTargetReachedWithCore(input: {
+  tasks: Task[];
+  timeEntries: TimeEntry[];
+  nowIso: string;
+}): Promise<CoreTargetReachedResult> {
+  return invokeCore<CoreTargetReachedResult>('core_target_reached', {
+    tasks: input.tasks.map(toCoreTask),
+    timeEntries: input.timeEntries.map(toCoreTimeEntry),
+    nowIso: input.nowIso,
+    nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),
+  });
 }
 
 export async function pauseTimerWithCore(input: {

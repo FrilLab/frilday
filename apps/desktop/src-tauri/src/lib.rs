@@ -32,7 +32,8 @@ pub fn run() {
             core_commands::core_start_timer,
             core_commands::core_stop_timer,
             core_commands::core_pause_timer,
-            core_commands::core_resume_timer
+            core_commands::core_resume_timer,
+            core_commands::core_target_reached
         ])
         .setup(bootstrap::setup)
         .run(tauri::generate_context!())

@@ -54,6 +54,7 @@ export function useAppModel() {
     completions,
     timeEntries,
     taskDailyMemos,
+    targetReached,
     errorMsg,
     clearError,
     createTask,
@@ -199,12 +200,11 @@ export function useAppModel() {
 
   const todayTasks = useMemo(() => {
     const filtered = tasks.filter((t) => {
-      if (!t.isActive) return false;
-
       const isOpenTimer = openTimerTaskId === t.id;
-      // Keep a recovered running or paused timer visible after midnight so it
-      // remains controllable from the following local day.
+      // Keep a recovered running or paused timer visible even if its task was
+      // archived, so the open session remains controllable.
       if (isOpenTimer) return true;
+      if (!t.isActive) return false;
       return visibleToday.get(t.id)?.visible ?? false;
     });
     return [...filtered].sort((a, b) => {
@@ -254,6 +254,11 @@ export function useAppModel() {
     }
     return states;
   }, [tasks, timeTotals, visibleToday]);
+
+  const targetReachedTaskIds = useMemo(
+    () => new Set(targetReached.map((target) => target.taskId)),
+    [targetReached],
+  );
 
   const manageTasks = useMemo(() => {
     const base = showArchived
@@ -496,6 +501,7 @@ export function useAppModel() {
     completions,
     timeEntries,
     taskDailyMemos,
+    targetReached,
     errorMsg,
 
     // time
@@ -528,6 +534,7 @@ export function useAppModel() {
     taskDayStates,
     todayTasks,
     manageTasks,
+    targetReachedTaskIds,
 
     // actions
     clearError,

@@ -13,6 +13,7 @@ pub mod schedule;
 pub mod session;
 pub mod stats;
 pub mod time;
+pub mod timer;
 
 pub use completion::{
     Completion, completion_count_for_routine, is_completed_for_plan, is_completed_on,
@@ -37,6 +38,7 @@ pub use stats::{
     aggregate_for_week, completion_stats_between, completion_stats_for_week,
 };
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
+pub use timer::{TargetReachedSession, target_reached_sessions_at};
 
 #[cfg(test)]
 mod tests {
@@ -460,6 +462,64 @@ mod tests {
         assert_eq!(
             next[0].actual_duration_at(next[1].started_at()).minutes(),
             1
+        );
+    }
+
+    #[test]
+    fn target_reached_is_read_only_and_preserves_overtime() {
+        let routine = routine();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let session = Session::start(
+            SessionId::new("session-1").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+        )
+        .unwrap();
+        let reached = target_reached_sessions_at(
+            std::slice::from_ref(&session),
+            std::slice::from_ref(&routine),
+            Timestamp::from_unix_seconds(1_767_603_600),
+        )
+        .unwrap();
+
+        assert_eq!(reached.len(), 1);
+        assert_eq!(reached[0].actual_minutes(), 60);
+        assert_eq!(reached[0].planned_minutes(), 30);
+        assert!(session.is_running());
+        assert_eq!(
+            session
+                .actual_duration_at(Timestamp::from_unix_seconds(1_767_603_600))
+                .minutes(),
+            60
+        );
+
+        let previous = Session::new(
+            SessionId::new("session-previous").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+            Some(Timestamp::from_unix_seconds(1_767_601_800)),
+        )
+        .unwrap();
+        let resumed = Session::start(
+            SessionId::new("session-resumed").unwrap(),
+            Some(routine.id().clone()),
+            None,
+            date,
+            Timestamp::from_unix_seconds(1_767_602_000),
+        )
+        .unwrap();
+        assert!(
+            target_reached_sessions_at(
+                &[previous, resumed],
+                std::slice::from_ref(&routine),
+                Timestamp::from_unix_seconds(1_767_602_000),
+            )
+            .unwrap()
+            .is_empty()
         );
     }
 

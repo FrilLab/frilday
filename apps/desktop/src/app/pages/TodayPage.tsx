@@ -73,9 +73,10 @@ export function TodayPage(props: {
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
+  onFinishTimer: (task: Task) => void; // (role: finish timer, type: (Task)=>void)
+  targetReachedTaskIds: ReadonlySet<string>; // (role: tasks at planned target, type: ReadonlySet<string>)
   onPauseTimer: (task: Task) => void; // (role: pause timer, type: (Task)=>void)
   onResumeTimer: (task: Task) => void; // (role: resume timer, type: (Task)=>void)
-  onFinishTimer: (task: Task) => void; // (role: finish timer, type: (Task)=>void)
   onBackToPlan: () => void; // (role: leave finished timer, type: ()=>void)
   onError: (msg: string) => void; // (role: error handler, type: (string)=>void)
 }) {
@@ -102,9 +103,10 @@ export function TodayPage(props: {
     onArchive,
     onStartTimer,
     onStopTimer,
+    onFinishTimer,
+    targetReachedTaskIds,
     onPauseTimer,
     onResumeTimer,
-    onFinishTimer,
     onBackToPlan,
     onError,
   } = props;
@@ -230,11 +232,54 @@ export function TodayPage(props: {
           onArchive={onArchive}
           onStartTimer={onStartTimer}
           onStopTimer={onStopTimer}
+          onFinishTimer={onFinishTimer}
           onError={onError}
           taskDayStates={taskDayStates}
+          targetReachedTaskIds={targetReachedTaskIds}
           isExecutionFocused={Boolean(activeTimerTask)}
           emptyMessage={t('task.noTasksScheduledToday')}
         />
+
+        <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-sm text-zinc-400">
+          <summary className="cursor-pointer select-none text-zinc-300">
+            {t('keyboard.title')}
+          </summary>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.start')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + S
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.pause')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + P
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.finish')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + F
+                </kbd>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt>{t('keyboard.today')}</dt>
+              <dd>
+                <kbd className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-200">
+                  Alt + Shift + T
+                </kbd>
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-zinc-500">{t('keyboard.hint')}</p>
+        </details>
       </section>
     </div>
   );

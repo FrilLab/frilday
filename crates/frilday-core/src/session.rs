@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use crate::{
     date::LocalDate,
@@ -463,12 +463,11 @@ impl SessionLedger {
     }
 
     fn validate(&self) -> Result<(), SessionError> {
-        if self.sessions.iter().enumerate().any(|(index, session)| {
-            self.sessions[..index]
-                .iter()
-                .any(|prior| prior.id() == session.id())
-        }) {
-            return Err(SessionError::DuplicateSessionId);
+        let mut ids = HashSet::with_capacity(self.sessions.len());
+        for session in &self.sessions {
+            if !ids.insert(session.id()) {
+                return Err(SessionError::DuplicateSessionId);
+            }
         }
         validate_no_concurrent_sessions(&self.sessions)?;
         if self

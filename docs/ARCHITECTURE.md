@@ -46,7 +46,8 @@ persistence. Desktop v0.1 does **not** require a local Axum HTTP server.
 
 The desktop Tauri adapter now translates the persisted `Task`, `Completion`,
 and `TimeEntry` shapes into core inputs for schedule visibility, completion
-transitions, durable session lifecycle transitions, and statistics. SQLite
+transitions, durable session lifecycle transitions, target-reached feedback,
+and statistics. SQLite
 schema, queries, typed writes, and legacy-data import live in the Rust-side
 desktop persistence adapter. React only calls typed Tauri persistence commands
 and never constructs application SQL or owns a full-table replacement.

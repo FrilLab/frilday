@@ -25,6 +25,7 @@ import { createTaskEntity } from '../../domain/task/taskFactory';
 import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import {
+  getTargetReachedWithCore,
   pauseTimerWithCore,
   resumeTimerWithCore,
   startTimerWithCore,
@@ -34,12 +35,21 @@ import {
 
 export type Filter = 'all' | Category;
 
+export type TargetReachedTask = {
+  sessionId: string;
+  taskId: string;
+  title: string;
+  actualMinutes: number;
+  plannedMinutes: number;
+};
+
 interface FrilDayState {
   hydrated: boolean;
   tasks: Task[];
   completions: Completion[];
   timeEntries: TimeEntry[];
   taskDailyMemos: TaskDailyMemo[];
+  targetReached: TargetReachedTask[];
   filter: Filter;
   errorMsg: string;
 
@@ -74,6 +84,7 @@ interface FrilDayState {
   pauseTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   resumeTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
   finishTimer: (input: { taskId: string; today: Date }) => Promise<TimerMutationResult>;
+  checkTargetReached: () => Promise<TargetReachedTask[]>;
 }
 
 function uid(): string {
@@ -94,6 +105,28 @@ function formatError(error: unknown): string {
   } catch {
     return 'Unknown error';
   }
+}
+
+function sameTargetReached(
+  left: TargetReachedTask[],
+  right: TargetReachedTask[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((target, index) => {
+    const other = right[index];
+    return (
+      target.sessionId === other?.sessionId &&
+      target.taskId === other.taskId &&
+      target.actualMinutes === other.actualMinutes &&
+      target.plannedMinutes === other.plannedMinutes
+    );
+  });
+}
+
+function hasOpenTimeEntry(timeEntries: TimeEntry[], taskId: string): boolean {
+  return timeEntries.some(
+    (timeEntry) => timeEntry.taskId === taskId && timeEntry.endedAt == null,
+  );
 }
 
 type TimerMutationResult = {
@@ -141,6 +174,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   completions: [],
   timeEntries: [],
   taskDailyMemos: [],
+  targetReached: [],
   filter: 'all',
   errorMsg: '',
 
@@ -273,6 +307,11 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
   },
 
   archiveTask: (taskId) => {
+    if (hasOpenTimeEntry(get().timeEntries, taskId)) {
+      set({ errorMsg: 'Pause or finish the timer before archiving this task.' });
+      return;
+    }
+
     const nextTasks = get().tasks.map((t) =>
       t.id === taskId ? { ...t, isActive: false } : t,
     );
@@ -328,14 +367,16 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
           date,
         });
         const toggledTask = get().tasks.find((task) => task.id === taskId);
+        const taskHasOpenSession = hasOpenTimeEntry(get().timeEntries, taskId);
+        const autoArchived = result.autoArchived && !taskHasOpenSession;
         const nextTasks =
-          result.autoArchived && toggledTask
+          autoArchived && toggledTask
             ? get().tasks.map((task) =>
                 task.id === taskId ? { ...task, isActive: false } : task,
               )
             : get().tasks;
 
-        if (result.autoArchived && toggledTask) {
+        if (autoArchived && toggledTask) {
           getNotifier().notify({
             level: 'info',
             message: `Auto-archived: ${toggledTask.title}`,
@@ -361,7 +402,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
                     completion.taskId === taskId && completion.date === date,
                 ),
               ),
-              ...(result.autoArchived
+              ...(autoArchived
                 ? [setTaskActive(taskId, false)]
                 : []),
             ]).then(() => undefined),
@@ -425,7 +466,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         ) {
           return { ok: false, changed: false };
         }
-        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
         return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to start timer. ${formatError(error)}` });
@@ -459,7 +500,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         ) {
           return { ok: false, changed: false };
         }
-        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
         return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to pause timer. ${formatError(error)}` });
@@ -493,7 +534,7 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         ) {
           return { ok: false, changed: false };
         }
-        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
         return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to resume timer. ${formatError(error)}` });
@@ -524,11 +565,39 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         ) {
           return { ok: false, changed: false };
         }
-        set({ timeEntries: nextTimeEntries, errorMsg: '' });
+        set({ timeEntries: nextTimeEntries, targetReached: [], errorMsg: '' });
         return { ok: true, changed: true };
       } catch (error) {
         set({ errorMsg: `Failed to finish timer. ${formatError(error)}` });
         return { ok: false, changed: false };
       }
     }),
+
+  checkTargetReached: async () => {
+    if (!get().hydrated) return [];
+
+    const nowIso = new Date().toISOString();
+    let result: Awaited<ReturnType<typeof getTargetReachedWithCore>>;
+    try {
+      result = await getTargetReachedWithCore({
+        timeEntries: get().timeEntries,
+        tasks: get().tasks,
+        nowIso,
+      });
+    } catch (error) {
+      set({ errorMsg: `Failed to check timer target. ${formatError(error)}` });
+      return [];
+    }
+
+    set((state) => {
+      if (
+        state.errorMsg === '' &&
+        sameTargetReached(state.targetReached, result.tasks)
+      ) {
+        return state;
+      }
+      return { targetReached: result.tasks, errorMsg: '' };
+    });
+    return result.tasks;
+  },
 }));

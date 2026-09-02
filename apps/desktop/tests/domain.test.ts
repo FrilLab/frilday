@@ -52,6 +52,8 @@ mock.module('@tauri-apps/api/core', () => ({
       case 'core_pause_timer':
       case 'core_resume_timer':
         return { timeEntries: [] };
+      case 'core_target_reached':
+        return { tasks: [] };
       default:
         throw new Error(`unexpected command: ${command}`);
     }
@@ -68,6 +70,7 @@ const {
   getCoreTimeTotals,
   getRunningTaskIdWithCore,
   getVisibleScheduleSlots,
+  getTargetReachedWithCore,
   pauseTimerWithCore,
   resumeTimerWithCore,
   startTimerWithCore,
@@ -173,6 +176,11 @@ describe('desktop core adapter', () => {
       dateYmd: '2026-01-05',
       resumedAt: '2026-01-05T10:02:00.000Z',
     });
+    await getTargetReachedWithCore({
+      tasks: [task],
+      timeEntries: [],
+      nowIso: '2026-01-05T10:03:00.000Z',
+    });
 
     expect(calls.map((call) => call.command)).toEqual([
       'core_toggle_completion',
@@ -183,6 +191,18 @@ describe('desktop core adapter', () => {
       'core_stop_timer',
       'core_pause_timer',
       'core_resume_timer',
+      'core_target_reached',
     ]);
+  });
+
+  test('checks a target without changing timer or completion records', async () => {
+    const result = await getTargetReachedWithCore({
+      tasks: [task],
+      timeEntries: [],
+      nowIso: '2026-01-05T10:01:00.000Z',
+    });
+
+    expect(result.tasks).toEqual([]);
+    expect(calls[0]?.command).toBe('core_target_reached');
   });
 });

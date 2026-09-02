@@ -39,9 +39,11 @@ interface TaskListProps {
 
   onStartTimer: (task: Task) => void;
   onStopTimer: (task: Task) => void;
+  onFinishTimer?: (task: Task) => void;
 
   onError: (msg: string) => void;
   taskDayStates: ReadonlyMap<string, TaskDayState>;
+  targetReachedTaskIds?: ReadonlySet<string>;
   isExecutionFocused?: boolean;
   emptyMessage?: string;
 }
@@ -85,8 +87,10 @@ export function TaskList(props: TaskListProps) {
           onUpdateTaskMeta={props.onUpdateTaskMeta}
           onStartTimer={props.onStartTimer}
           onStopTimer={props.onStopTimer}
+          onFinishTimer={props.onFinishTimer}
           onError={props.onError}
           taskDayState={props.taskDayStates.get(t.id)}
+          targetReached={props.targetReachedTaskIds?.has(t.id) ?? false}
           isExecutionFocused={props.isExecutionFocused}
         />
       ))}

@@ -6,7 +6,15 @@ import type {
   TaskDayState,
   TimeEntry,
 } from '../types';
-import { Archive, Check, Pause, Pencil, Play, StickyNote } from 'lucide-react';
+import {
+  Archive,
+  Check,
+  Pause,
+  Pencil,
+  Play,
+  Square,
+  StickyNote,
+} from 'lucide-react';
 import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
 
@@ -30,6 +38,7 @@ interface TaskListItemProps {
   onDelete?: (taskId: string) => void; // (role: hard delete handler, type: ((string)=>void) | undefined)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
   onStopTimer: (task: Task) => void; // (role: stop timer, type: (Task)=>void)
+  onFinishTimer?: (task: Task) => void; // (role: finish timer, type: ((Task)=>void) | undefined)
   onSaveMemo?: (input: { taskId: string; date: string; text: string }) => void; // (role: save daily memo, type: ((input)=>void) | undefined)
   onUpdateTaskMeta?: (input: {
     taskId: string;
@@ -40,6 +49,7 @@ interface TaskListItemProps {
   }) => void; // (role: update task fields, type: ((input)=>void) | undefined)
   onError: (msg: string) => void; // (role: set error message, type: (string)=>void)
   taskDayState?: TaskDayState;
+  targetReached?: boolean; // (role: planned target reached, type: boolean | undefined)
   isExecutionFocused?: boolean;
 }
 
@@ -59,10 +69,12 @@ export function TaskListItem(props: TaskListItemProps) {
     onDelete,
     onStartTimer,
     onStopTimer,
+    onFinishTimer,
     onSaveMemo,
     onUpdateTaskMeta,
     onError,
     taskDayState,
+    targetReached = false,
     isExecutionFocused,
   } = props;
 
@@ -192,7 +204,9 @@ export function TaskListItem(props: TaskListItemProps) {
     <div
       className={clsx(
         'rounded-2xl border p-3 transition',
-        scheduledToday
+        targetReached
+          ? 'border-amber-400/40 bg-amber-400/10'
+          : scheduledToday
           ? 'border-zinc-800 bg-zinc-950/40'
           : 'border-zinc-900 bg-zinc-950/20 opacity-80',
         variant == 'today' ? 'xl:px-5 xl:pt-5' : '',
@@ -255,6 +269,16 @@ export function TaskListItem(props: TaskListItemProps) {
                 · {paused ? tr('timer.paused') : tr('common.running')}
               </span>
             )}
+            {targetReached && (
+              <div
+                className="mt-2 rounded-lg border border-amber-300/30 bg-amber-300/10 px-2 py-1 text-xs text-amber-100"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true">
+                {tr('time.targetReached')}{' '}
+                {tr('time.overtimeTracking')}
+              </div>
+            )}
             {!scheduledToday && (
               <span className="ml-2 text-zinc-600">
                 {tr('empty.notScheduledToday')}
@@ -296,6 +320,16 @@ export function TaskListItem(props: TaskListItemProps) {
                 }
                 onStartTimer(task);
               }}
+              id={running ? 'frilday-timer-control' : undefined}
+              data-timer-control={variant === 'today' ? 'true' : undefined}
+              aria-label={tr(
+                running
+                  ? 'time.pauseTimerForTask'
+                  : totalMinutesToday > 0
+                    ? 'time.resumeTimerForTask'
+                    : 'time.startTimerForTask',
+                { task: task.title },
+              )}
               disabled={(!scheduledToday && !open) || (doneToday && !open)}
               className={[
                 'rounded-xl border px-3 py-2 text-sm transition min-w-18 shrink-0',
@@ -320,6 +354,21 @@ export function TaskListItem(props: TaskListItemProps) {
             </button>
           )}
 
+          {variant === 'today' && running && onFinishTimer && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!window.confirm(tr('note.finishConfirm', { title: task.title }))) {
+                  return;
+                }
+                onFinishTimer(task);
+              }}
+              aria-label={tr('time.finishTimerForTask', { task: task.title })}
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 transition hover:bg-zinc-900">
+              <Square size={14} /> {tr('time.finish')}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -329,6 +378,11 @@ export function TaskListItem(props: TaskListItemProps) {
               }
               onToggleToday(task);
             }}
+            aria-label={tr(
+              doneToday ? 'task.markIncomplete' : 'task.markComplete',
+              { task: task.title },
+            )}
+            aria-pressed={doneToday}
             disabled={!scheduledToday}
             className={[
               'inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition',
@@ -354,6 +408,8 @@ export function TaskListItem(props: TaskListItemProps) {
             <button
               type="button"
               onClick={onToggleMemo}
+              aria-expanded={memoOpen}
+              aria-label={tr('task.toggleMemoForTask', { task: task.title })}
               className="rounded-xl inline-flex items-center gap-1 border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900/70">
               <StickyNote size={14} /> {tr('task.memo')}
             </button>

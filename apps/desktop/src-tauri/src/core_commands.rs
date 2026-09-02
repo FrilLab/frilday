@@ -4,9 +4,10 @@ use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
     completion_count_for_routine, completion_stats_between, completion_stats_for_week,
     eligible_dates_between, pause_session_for_routine, resume_session_for_routine,
-    running_routine_id, start_session, stop_session_for_routine, toggle_routine_completion,
-    visible_dates_between, Completion, LocalDate, Plan, PlanId, PlannedDuration, Routine,
-    RoutineCategory, RoutineId, RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
+    running_routine_id, start_session, stop_session_for_routine, target_reached_sessions_at,
+    toggle_routine_completion, visible_dates_between, Completion, LocalDate, Plan, PlanId,
+    PlannedDuration, Routine, RoutineCategory, RoutineId, RoutineStatsTarget, ScheduleRule,
+    Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -569,6 +570,63 @@ pub fn core_resume_timer(request: ResumeTimerRequest) -> Result<TimerOutput, Str
             &request.resumed_at,
             request.resumed_at_millis,
         ),
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetReachedRequest {
+    tasks: Vec<TaskInput>,
+    time_entries: Vec<TimeEntryInput>,
+    now_millis: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetReachedTaskOutput {
+    session_id: String,
+    task_id: String,
+    title: String,
+    actual_minutes: u64,
+    planned_minutes: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetReachedOutput {
+    tasks: Vec<TargetReachedTaskOutput>,
+}
+
+#[tauri::command]
+pub fn core_target_reached(request: TargetReachedRequest) -> Result<TargetReachedOutput, String> {
+    let sessions = request
+        .time_entries
+        .iter()
+        .map(session_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let routines = request
+        .tasks
+        .iter()
+        .map(routine_from_task)
+        .collect::<Result<Vec<_>, _>>()?;
+    let reached = target_reached_sessions_at(
+        &sessions,
+        &routines,
+        Timestamp::from_unix_millis(request.now_millis),
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(TargetReachedOutput {
+        tasks: reached
+            .iter()
+            .map(|target| TargetReachedTaskOutput {
+                session_id: target.session_id().to_string(),
+                task_id: target.routine_id().to_string(),
+                title: target.title().to_owned(),
+                actual_minutes: target.actual_minutes(),
+                planned_minutes: target.planned_minutes(),
+            })
+            .collect(),
     })
 }
 

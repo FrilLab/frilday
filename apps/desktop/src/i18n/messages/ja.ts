@@ -72,6 +72,9 @@ export const ja = {
     archive: 'アーカイブ',
     restore: '復元',
     delete: '削除',
+    markComplete: '「{task}」を完了にする',
+    markIncomplete: '「{task}」の完了を取り消す',
+    toggleMemoForTask: '「{task}」のメモを開閉',
     todayTasks: '今日のタスク',
     noTasks: 'タスクがありません。',
     noTasksScheduledToday: '今日予定されているタスクはありません。',
@@ -100,7 +103,15 @@ export const ja = {
     trackedToday: '今日記録した実績時間',
     start: '開始',
     stop: '停止',
+    pause: '一時停止',
     resume: '再開',
+    finish: '終了',
+    targetReached: '予定時間に到達しました。',
+    overtimeTracking: '超過時間を引き続き記録しています。',
+    startTimerForTask: '「{task}」のタイマーを開始',
+    resumeTimerForTask: '「{task}」のタイマーを再開',
+    pauseTimerForTask: '「{task}」のタイマーを一時停止',
+    finishTimerForTask: '「{task}」のタイマーを終了',
     hourShort: '時間',
     minuteShort: '分',
     day: {
@@ -167,7 +178,17 @@ export const ja = {
       '今日やることを整理し、完了状況と使った時間を記録しましょう。繰り返し予定と日別メモで習慣を整え、目標回数に達したタスクは自動アーカイブで整理できるため、アクティブ一覧をすっきり保てます。',
     deleteConfirm:
       '"{title}" を完全に削除しますか?\nこの操作は元に戻せません。',
+    finishConfirm: '「{title}」の記録を終了しますか?\n記録済みの時間は保持されます。',
     taskNotScheduledToday: 'このタスクは今日の予定ではありません。',
+  },
+
+  keyboard: {
+    title: 'キーボードショートカット',
+    start: '最初に実行可能なタスクを開始/再開',
+    pause: '実行中のタイマーを一時停止',
+    finish: '実行中のタイマーを終了',
+    today: '今日に戻ってタイマーにフォーカス',
+    hint: 'テキスト入力中はショートカットが無効になります。',
   },
 
   schedule: {
@@ -181,6 +202,10 @@ export const ja = {
     timerDone: {
       title: 'タイマー完了',
       body: '"{task}" のタイマーが完了しました。',
+    },
+    targetReached: {
+      title: '予定時間に到達',
+      body: '「{task}」が予定時間に到達しました。超過時間を記録しています。',
     },
   },
 
@@ -196,8 +221,8 @@ export const ja = {
     },
     notifications: {
       timerDone: {
-        title: 'タイマー完了通知',
-        desc: '実行中のタイマーが自動で終了したら通知します。',
+        title: '予定時間到達通知',
+        desc: '実行中のタイマーが予定時間に到達したら通知します。',
         hintDenied:
           '通知権限が拒否されました。システム設定で通知を許可してから再試行してください。',
       },
