@@ -8,6 +8,7 @@ pub mod completion;
 pub mod date;
 pub mod ids;
 pub mod plan;
+pub mod planning;
 pub mod routine;
 pub mod schedule;
 pub mod session;
@@ -17,11 +18,12 @@ pub mod timer;
 
 pub use completion::{
     Completion, completion_count_for_routine, is_completed_for_plan, is_completed_on,
-    toggle_plan_completion, toggle_routine_completion,
+    toggle_plan_completion, toggle_routine_completion, toggle_routine_completion_for_plan,
 };
 pub use date::{DateError, LocalDate, Weekday};
 pub use ids::{IdError, PlanId, RoutineId, SessionId};
-pub use plan::{Plan, PlanStatus};
+pub use plan::{Plan, PlanError, PlanStatus};
+pub use planning::{RoutinePlanTarget, resolve_plan, resolve_plans};
 pub use routine::{Routine, RoutineError};
 pub use schedule::{
     CustomSchedule, ScheduleError, ScheduleRule, completed_dates_between, effective_start_on,
@@ -35,10 +37,13 @@ pub use session::{
 pub use stats::{
     CompletionTotals, DailyTotals, RoutineCategory, RoutineStatsTarget, TimeTotals,
     WeeklyCompletionStats, WeeklyTotals, actual_minutes_for_routine, aggregate_for_date,
-    aggregate_for_week, completion_stats_between, completion_stats_for_week,
+    aggregate_for_week, completion_stats_between, completion_stats_between_with_plans,
+    completion_stats_for_week, completion_stats_for_week_with_plans,
 };
 pub use time::{ActualDuration, PlannedDuration, Timestamp};
-pub use timer::{TargetReachedSession, target_reached_sessions_at};
+pub use timer::{
+    TargetReachedSession, target_reached_sessions_at, target_reached_sessions_at_with_plans,
+};
 
 #[cfg(test)]
 mod tests {
@@ -409,6 +414,22 @@ mod tests {
     }
 
     #[test]
+    fn completion_toggle_can_bind_a_routine_date_to_its_plan() {
+        let routine_id = RoutineId::new("routine-1").unwrap();
+        let plan_id = PlanId::new("plan-1").unwrap();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let next =
+            toggle_routine_completion_for_plan(&[], routine_id.clone(), plan_id.clone(), date);
+
+        assert_eq!(next[0].routine_id(), Some(&routine_id));
+        assert_eq!(next[0].plan_id(), Some(&plan_id));
+        assert_eq!(
+            toggle_routine_completion_for_plan(&next, routine_id, plan_id, date),
+            Vec::new()
+        );
+    }
+
+    #[test]
     fn session_ledger_enforces_unique_ids_and_one_running_session() {
         let date = LocalDate::parse("2026-01-05").unwrap();
         let routine_id = RoutineId::new("routine-1").unwrap();
@@ -579,6 +600,46 @@ mod tests {
     }
 
     #[test]
+    fn target_reached_uses_the_session_plan_override() {
+        let routine = routine();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let mut plan = Plan::new(
+            PlanId::new("plan-override").unwrap(),
+            Some(routine.id().clone()),
+            date,
+            routine.planned_duration(),
+        );
+        plan.set_duration_override(Some(PlannedDuration::from_minutes(45).unwrap()));
+        let session = Session::start(
+            SessionId::new("session-plan-override").unwrap(),
+            Some(routine.id().clone()),
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+        )
+        .unwrap();
+
+        assert!(
+            target_reached_sessions_at_with_plans(
+                std::slice::from_ref(&session),
+                std::slice::from_ref(&routine),
+                std::slice::from_ref(&plan),
+                Timestamp::from_unix_seconds(1_767_602_400),
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let reached = target_reached_sessions_at_with_plans(
+            std::slice::from_ref(&session),
+            std::slice::from_ref(&routine),
+            std::slice::from_ref(&plan),
+            Timestamp::from_unix_seconds(1_767_602_700),
+        )
+        .unwrap();
+        assert_eq!(reached[0].planned_minutes(), 45);
+    }
+
+    #[test]
     fn completion_statistics_keep_category_buckets_and_start_cutoffs() {
         let routine = routine();
         let created = LocalDate::parse("2026-01-01").unwrap();
@@ -616,5 +677,51 @@ mod tests {
 
         assert_eq!(totals.scheduled_count(), 3);
         assert_eq!(totals.completed_count(), 1);
+    }
+
+    #[test]
+    fn skipped_plans_are_excluded_from_period_and_weekly_completion_stats() {
+        let routine = Routine::new(
+            RoutineId::new("routine-single-day").unwrap(),
+            "Focus",
+            "",
+            PlannedDuration::from_minutes(30).unwrap(),
+            ScheduleRule::custom([Weekday::Mon]).unwrap(),
+            Timestamp::from_unix_seconds(1_767_225_600),
+        )
+        .unwrap();
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let mut skipped = Plan::from_routine(&routine, date, date).unwrap();
+        skipped.skip();
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: date,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let weekly = completion_stats_for_week_with_plans(&targets, &[skipped.clone()], &[], date);
+        assert_eq!(weekly.total().scheduled_count(), 0);
+        assert_eq!(weekly.total().completed_count(), 0);
+
+        let period = completion_stats_between_with_plans(&targets, &[skipped], &[], date, date);
+        assert_eq!(period.scheduled_count(), 0);
+        assert_eq!(period.completed_count(), 0);
+    }
+
+    #[test]
+    fn skipping_one_occurrence_does_not_remove_other_weekly_occurrences() {
+        let routine = routine();
+        let monday = LocalDate::parse("2026-01-05").unwrap();
+        let mut skipped = Plan::from_routine(&routine, monday, monday).unwrap();
+        skipped.skip();
+        let targets = [RoutineStatsTarget {
+            routine: &routine,
+            created_local_date: monday,
+            category: RoutineCategory::Weekday,
+        }];
+
+        let weekly = completion_stats_for_week_with_plans(&targets, &[skipped], &[], monday);
+        assert_eq!(weekly.total().scheduled_count(), 1);
+        assert_eq!(weekly.total().completed_count(), 0);
     }
 }

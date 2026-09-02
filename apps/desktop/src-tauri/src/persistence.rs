@@ -29,7 +29,21 @@ pub struct TaskRecord {
 #[serde(rename_all = "camelCase")]
 pub struct CompletionRecord {
     pub task_id: String,
+    #[serde(default)]
+    pub plan_id: Option<String>,
     pub date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanRecord {
+    pub id: String,
+    pub routine_id: Option<String>,
+    pub date: String,
+    pub baseline_duration_minutes: u32,
+    pub duration_override_minutes: Option<u32>,
+    pub status: String,
+    pub moved_to_ymd: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,6 +51,8 @@ pub struct CompletionRecord {
 pub struct TimeEntryRecord {
     pub id: String,
     pub task_id: String,
+    #[serde(default)]
+    pub plan_id: Option<String>,
     pub date: String,
     pub started_at: String,
     pub ended_at: Option<String>,
@@ -64,6 +80,8 @@ pub struct TaskDailyMemoRecord {
 pub struct AppData {
     pub tasks: Vec<TaskRecord>,
     pub completions: Vec<CompletionRecord>,
+    #[serde(default)]
+    pub plans: Vec<PlanRecord>,
     pub time_entries: Vec<TimeEntryRecord>,
     pub task_daily_memos: Vec<TaskDailyMemoRecord>,
 }
@@ -88,6 +106,8 @@ pub struct CompletionStateRequest {
     pub task_id: String,
     pub date: String,
     pub completed: bool,
+    #[serde(default)]
+    pub plan_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,13 +142,26 @@ struct TaskRow {
 #[derive(Debug, FromRow)]
 struct CompletionRow {
     task_id: String,
+    plan_id: Option<String>,
     date: String,
+}
+
+#[derive(Debug, FromRow)]
+struct PlanRow {
+    id: String,
+    routine_id: Option<String>,
+    date: String,
+    baseline_duration_minutes: i64,
+    duration_override_minutes: Option<i64>,
+    status: String,
+    moved_to_ymd: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
 struct TimeEntryRow {
     id: String,
     task_id: String,
+    plan_id: Option<String>,
     date: String,
     started_at: String,
     ended_at: Option<String>,
@@ -184,12 +217,24 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
         )",
         "CREATE TABLE IF NOT EXISTS completions (
             task_id TEXT NOT NULL,
+            plan_id TEXT,
             date TEXT NOT NULL,
             PRIMARY KEY (task_id, date)
+        )",
+        "CREATE TABLE IF NOT EXISTS plans (
+            id TEXT PRIMARY KEY,
+            routine_id TEXT,
+            date TEXT NOT NULL,
+            baseline_duration_minutes INTEGER NOT NULL,
+            duration_override_minutes INTEGER,
+            status TEXT NOT NULL,
+            moved_to_ymd TEXT,
+            UNIQUE (routine_id, date)
         )",
         "CREATE TABLE IF NOT EXISTS time_entries (
             id TEXT PRIMARY KEY,
             task_id TEXT NOT NULL,
+            plan_id TEXT,
             date TEXT NOT NULL,
             started_at TEXT NOT NULL,
             ended_at TEXT,
@@ -215,6 +260,18 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             .map_err(|error| format!("Failed to initialize app database: {error}"))?;
     }
 
+    let completion_columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('completions')")
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("Failed to inspect completion schema: {error}"))?;
+    if !completion_columns.iter().any(|column| column == "plan_id") {
+        sqlx::query("ALTER TABLE completions ADD COLUMN plan_id TEXT")
+            .execute(pool)
+            .await
+            .map_err(|error| format!("Failed to migrate completion schema: {error}"))?;
+    }
+
     // Existing installations have the original six-column time_entries table.
     // Add lifecycle columns in place so the persisted database filename and
     // legacy records remain usable.
@@ -227,6 +284,7 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
         ("paused_at", "TEXT"),
         ("active_started_at", "TEXT"),
         ("accumulated_millis", "INTEGER NOT NULL DEFAULT 0"),
+        ("plan_id", "TEXT"),
     ] {
         if !columns.iter().any(|column| column == name) {
             sqlx::query(&format!(
@@ -236,6 +294,82 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             .await
             .map_err(|error| format!("Failed to migrate time entry schema: {error}"))?;
         }
+    }
+
+    backfill_historical_plans(pool).await?;
+
+    Ok(())
+}
+
+/// Give pre-Plan completions and time entries a stable date-specific identity
+/// without rewriting their existing rows. The Routine default is the only
+/// historical baseline available to the legacy schema, so it is snapshotted
+/// once and never replaced on later Routine edits.
+async fn backfill_historical_plans(pool: &SqlitePool) -> Result<(), String> {
+    let routines: Vec<(String, i64)> = sqlx::query_as("SELECT id, duration_minutes FROM tasks")
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("Failed to read routines for Plan migration: {error}"))?;
+
+    let historical_dates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT task_id, date FROM completions
+         UNION
+         SELECT task_id, date FROM time_entries",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to read history for Plan migration: {error}"))?;
+
+    for (routine_id, date) in historical_dates {
+        let Some((_, duration_minutes)) = routines
+            .iter()
+            .find(|(candidate, _)| candidate == &routine_id)
+        else {
+            continue;
+        };
+        let Ok(duration_minutes) = u32::try_from(*duration_minutes) else {
+            continue;
+        };
+        if duration_minutes == 0 {
+            continue;
+        }
+        let plan_id = format!("routine-plan:{}:{}:{}", routine_id.len(), routine_id, date);
+        sqlx::query(
+            "INSERT INTO plans (
+                id, routine_id, date, baseline_duration_minutes,
+                duration_override_minutes, status, moved_to_ymd
+             ) VALUES (?, ?, ?, ?, NULL, 'planned', NULL)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&plan_id)
+        .bind(&routine_id)
+        .bind(&date)
+        .bind(i64::from(duration_minutes))
+        .execute(pool)
+        .await
+        .map_err(|error| format!("Failed to migrate historical Plan: {error}"))?;
+
+        sqlx::query(
+            "UPDATE time_entries SET plan_id = ?
+             WHERE task_id = ? AND date = ? AND plan_id IS NULL",
+        )
+        .bind(&plan_id)
+        .bind(&routine_id)
+        .bind(&date)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("Failed to link historical Session to Plan: {error}"))?;
+
+        sqlx::query(
+            "UPDATE completions SET plan_id = ?
+             WHERE task_id = ? AND date = ? AND plan_id IS NULL",
+        )
+        .bind(&plan_id)
+        .bind(&routine_id)
+        .bind(&date)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("Failed to link historical Completion to Plan: {error}"))?;
     }
 
     Ok(())
@@ -258,14 +392,14 @@ pub async fn load_app_data_from_pool(pool: &SqlitePool) -> Result<AppData, Strin
     .map_err(|error| format!("Failed to load tasks: {error}"))?;
 
     let completion_rows = sqlx::query_as::<_, CompletionRow>(
-        "SELECT task_id, date FROM completions ORDER BY date DESC, task_id ASC",
+        "SELECT task_id, plan_id, date FROM completions ORDER BY date DESC, task_id ASC",
     )
     .fetch_all(pool)
     .await
     .map_err(|error| format!("Failed to load completions: {error}"))?;
 
     let time_entry_rows = sqlx::query_as::<_, TimeEntryRow>(
-        "SELECT id, task_id, date, started_at, ended_at, paused_at,
+        "SELECT id, task_id, plan_id, date, started_at, ended_at, paused_at,
                 active_started_at, accumulated_millis, minutes
          FROM time_entries ORDER BY started_at DESC",
     )
@@ -296,9 +430,21 @@ pub async fn load_app_data_from_pool(pool: &SqlitePool) -> Result<AppData, Strin
             .into_iter()
             .map(|row| CompletionRecord {
                 task_id: row.task_id,
+                plan_id: row.plan_id,
                 date: row.date,
             })
             .collect(),
+        plans: sqlx::query_as::<_, PlanRow>(
+            "SELECT id, routine_id, date, baseline_duration_minutes,
+                    duration_override_minutes, status, moved_to_ymd
+             FROM plans ORDER BY date ASC, id ASC",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("Failed to load plans: {error}"))?
+        .into_iter()
+        .map(plan_from_row)
+        .collect::<Result<Vec<_>, _>>()?,
         time_entries,
         task_daily_memos: memo_rows
             .into_iter()
@@ -344,6 +490,7 @@ fn time_entry_from_row(row: TimeEntryRow) -> Result<TimeEntryRecord, String> {
     Ok(TimeEntryRecord {
         id: row.id,
         task_id: row.task_id,
+        plan_id: row.plan_id,
         date: row.date,
         started_at: row.started_at,
         ended_at: row.ended_at,
@@ -353,6 +500,23 @@ fn time_entry_from_row(row: TimeEntryRow) -> Result<TimeEntryRecord, String> {
             .map_err(|_| "Time entry accumulated duration is invalid".to_owned())?,
         minutes: u32::try_from(row.minutes)
             .map_err(|_| "Time entry duration is outside the supported range".to_owned())?,
+    })
+}
+
+fn plan_from_row(row: PlanRow) -> Result<PlanRecord, String> {
+    Ok(PlanRecord {
+        id: row.id,
+        routine_id: row.routine_id,
+        date: row.date,
+        baseline_duration_minutes: u32::try_from(row.baseline_duration_minutes)
+            .map_err(|_| "Plan baseline duration is invalid".to_owned())?,
+        duration_override_minutes: row
+            .duration_override_minutes
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| "Plan duration override is invalid".to_owned())?,
+        status: row.status,
+        moved_to_ymd: row.moved_to_ymd,
     })
 }
 
@@ -421,7 +585,13 @@ pub async fn set_migration_marker(
 }
 
 async fn has_existing_data(pool: &SqlitePool) -> Result<bool, String> {
-    let tables = ["tasks", "completions", "time_entries", "task_daily_memos"];
+    let tables = [
+        "tasks",
+        "completions",
+        "plans",
+        "time_entries",
+        "task_daily_memos",
+    ];
     for table in tables {
         let query = format!("SELECT EXISTS(SELECT 1 FROM {table} LIMIT 1)");
         let has_rows: i64 = sqlx::query_scalar(&query)
@@ -509,13 +679,71 @@ async fn insert_completion(
     executor: &mut Transaction<'_, Sqlite>,
     completion: &CompletionRecord,
 ) -> Result<(), String> {
-    sqlx::query("INSERT INTO completions (task_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING")
-        .bind(&completion.task_id)
-        .bind(&completion.date)
-        .execute(&mut **executor)
-        .await
-        .map(|_| ())
-        .map_err(|error| format!("Failed to save completion: {error}"))
+    sqlx::query(
+        "INSERT INTO completions (task_id, plan_id, date) VALUES (?, ?, ?)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(&completion.task_id)
+    .bind(&completion.plan_id)
+    .bind(&completion.date)
+    .execute(&mut **executor)
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("Failed to save completion: {error}"))
+}
+
+async fn insert_plan(
+    executor: &mut Transaction<'_, Sqlite>,
+    plan: &PlanRecord,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO plans (
+            id, routine_id, date, baseline_duration_minutes,
+            duration_override_minutes, status, moved_to_ymd
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+            routine_id = excluded.routine_id,
+            date = excluded.date,
+            baseline_duration_minutes = excluded.baseline_duration_minutes,
+            duration_override_minutes = excluded.duration_override_minutes,
+            status = excluded.status,
+            moved_to_ymd = excluded.moved_to_ymd",
+    )
+    .bind(&plan.id)
+    .bind(&plan.routine_id)
+    .bind(&plan.date)
+    .bind(i64::from(plan.baseline_duration_minutes))
+    .bind(plan.duration_override_minutes.map(i64::from))
+    .bind(&plan.status)
+    .bind(&plan.moved_to_ymd)
+    .execute(&mut **executor)
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("Failed to save plan: {error}"))
+}
+
+async fn insert_plan_if_absent(
+    executor: &mut Transaction<'_, Sqlite>,
+    plan: &PlanRecord,
+) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO plans (
+            id, routine_id, date, baseline_duration_minutes,
+            duration_override_minutes, status, moved_to_ymd
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(&plan.id)
+    .bind(&plan.routine_id)
+    .bind(&plan.date)
+    .bind(i64::from(plan.baseline_duration_minutes))
+    .bind(plan.duration_override_minutes.map(i64::from))
+    .bind(&plan.status)
+    .bind(&plan.moved_to_ymd)
+    .execute(&mut **executor)
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("Failed to import plan: {error}"))
 }
 
 async fn insert_time_entry(
@@ -524,11 +752,12 @@ async fn insert_time_entry(
 ) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO time_entries (
-            id, task_id, date, started_at, ended_at, paused_at,
+            id, task_id, plan_id, date, started_at, ended_at, paused_at,
             active_started_at, accumulated_millis, minutes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             task_id = excluded.task_id,
+            plan_id = excluded.plan_id,
             date = excluded.date,
             started_at = excluded.started_at,
             ended_at = excluded.ended_at,
@@ -539,6 +768,7 @@ async fn insert_time_entry(
     )
     .bind(&entry.id)
     .bind(&entry.task_id)
+    .bind(&entry.plan_id)
     .bind(&entry.date)
     .bind(&entry.started_at)
     .bind(&entry.ended_at)
@@ -562,13 +792,14 @@ async fn insert_time_entry_if_absent(
 ) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO time_entries (
-            id, task_id, date, started_at, ended_at, paused_at,
+            id, task_id, plan_id, date, started_at, ended_at, paused_at,
             active_started_at, accumulated_millis, minutes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING",
     )
     .bind(&entry.id)
     .bind(&entry.task_id)
+    .bind(&entry.plan_id)
     .bind(&entry.date)
     .bind(&entry.started_at)
     .bind(&entry.ended_at)
@@ -653,6 +884,9 @@ async fn import_app_data(
     for completion in &data.completions {
         insert_completion(&mut transaction, completion).await?;
     }
+    for plan in &data.plans {
+        insert_plan_if_absent(&mut transaction, plan).await?;
+    }
     for entry in &data.time_entries {
         insert_time_entry_if_absent(&mut transaction, entry).await?;
     }
@@ -664,6 +898,8 @@ async fn import_app_data(
         .commit()
         .await
         .map_err(|error| format!("Failed to commit data migration: {error}"))?;
+
+    backfill_historical_plans(pool).await?;
 
     Ok(LegacyMigrationOutput {
         imported: !data.tasks.is_empty()
@@ -702,6 +938,37 @@ pub async fn save_task(
 }
 
 #[tauri::command]
+pub async fn save_plan(
+    db_instances: State<'_, DbInstances>,
+    plan: PlanRecord,
+) -> Result<(), String> {
+    let pool = database_pool(&db_instances).await?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin app data transaction: {error}"))?;
+    insert_plan(&mut transaction, &plan).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Failed to commit app data transaction: {error}"))
+}
+
+#[tauri::command]
+pub async fn delete_plan(
+    db_instances: State<'_, DbInstances>,
+    plan_id: String,
+) -> Result<(), String> {
+    let pool = database_pool(&db_instances).await?;
+    sqlx::query("DELETE FROM plans WHERE id = ?")
+        .bind(plan_id)
+        .execute(&pool)
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("Failed to remove plan: {error}"))
+}
+
+#[tauri::command]
 pub async fn set_task_active(
     db_instances: State<'_, DbInstances>,
     request: TaskActiveRequest,
@@ -734,6 +1001,11 @@ pub async fn delete_task(
             .await
             .map_err(|error| format!("Failed to delete task data: {error}"))?;
     }
+    sqlx::query("DELETE FROM plans WHERE routine_id = ?")
+        .bind(&task_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| format!("Failed to delete task plans: {error}"))?;
     sqlx::query("DELETE FROM tasks WHERE id = ?")
         .bind(task_id)
         .execute(&mut *transaction)
@@ -752,13 +1024,17 @@ pub async fn set_completion(
 ) -> Result<(), String> {
     let pool = database_pool(&db_instances).await?;
     if request.completed {
-        sqlx::query("INSERT INTO completions (task_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING")
-            .bind(request.task_id)
-            .bind(request.date)
-            .execute(&pool)
-            .await
-            .map(|_| ())
-            .map_err(|error| format!("Failed to save completion: {error}"))
+        sqlx::query(
+            "INSERT INTO completions (task_id, plan_id, date) VALUES (?, ?, ?)
+             ON CONFLICT(task_id, date) DO UPDATE SET plan_id = excluded.plan_id",
+        )
+        .bind(request.task_id)
+        .bind(request.plan_id)
+        .bind(request.date)
+        .execute(&pool)
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("Failed to save completion: {error}"))
     } else {
         sqlx::query("DELETE FROM completions WHERE task_id = ? AND date = ?")
             .bind(request.task_id)
@@ -877,11 +1153,22 @@ mod tests {
             }],
             completions: vec![CompletionRecord {
                 task_id: "task-1".to_owned(),
+                plan_id: Some("routine-plan:6:task-1:2026-01-05".to_owned()),
                 date: "2026-01-05".to_owned(),
+            }],
+            plans: vec![PlanRecord {
+                id: "routine-plan:6:task-1:2026-01-05".to_owned(),
+                routine_id: Some("task-1".to_owned()),
+                date: "2026-01-05".to_owned(),
+                baseline_duration_minutes: 30,
+                duration_override_minutes: None,
+                status: "planned".to_owned(),
+                moved_to_ymd: None,
             }],
             time_entries: vec![TimeEntryRecord {
                 id: "entry-1".to_owned(),
                 task_id: "task-1".to_owned(),
+                plan_id: Some("routine-plan:6:task-1:2026-01-05".to_owned()),
                 date: "2026-01-05".to_owned(),
                 started_at: "2026-01-05T09:00:00.000Z".to_owned(),
                 ended_at: None,
@@ -952,25 +1239,31 @@ mod tests {
             completions: vec![
                 CompletionRecord {
                     task_id: "active-weekday".to_owned(),
+                    plan_id: None,
                     date: "2026-01-05".to_owned(),
                 },
                 CompletionRecord {
                     task_id: "active-weekday".to_owned(),
+                    plan_id: None,
                     date: "2026-01-12".to_owned(),
                 },
                 CompletionRecord {
                     task_id: "archived-weekend".to_owned(),
+                    plan_id: None,
                     date: "2025-12-20".to_owned(),
                 },
                 CompletionRecord {
                     task_id: "active-custom".to_owned(),
+                    plan_id: None,
                     date: "2026-01-06".to_owned(),
                 },
             ],
+            plans: vec![],
             time_entries: vec![
                 TimeEntryRecord {
                     id: "entry-active-history".to_owned(),
                     task_id: "active-weekday".to_owned(),
+                    plan_id: None,
                     date: "2025-12-29".to_owned(),
                     started_at: "2025-12-29T09:00:00.000Z".to_owned(),
                     ended_at: Some("2025-12-29T09:40:00.000Z".to_owned()),
@@ -982,6 +1275,7 @@ mod tests {
                 TimeEntryRecord {
                     id: "entry-active-running".to_owned(),
                     task_id: "active-weekday".to_owned(),
+                    plan_id: None,
                     date: "2026-01-05".to_owned(),
                     started_at: "2026-01-05T10:00:00.000Z".to_owned(),
                     ended_at: None,
@@ -993,6 +1287,7 @@ mod tests {
                 TimeEntryRecord {
                     id: "entry-archived-history".to_owned(),
                     task_id: "archived-weekend".to_owned(),
+                    plan_id: None,
                     date: "2025-12-20".to_owned(),
                     started_at: "2025-12-20T11:00:00.000Z".to_owned(),
                     ended_at: Some("2025-12-20T11:25:00.000Z".to_owned()),
@@ -1004,6 +1299,7 @@ mod tests {
                 TimeEntryRecord {
                     id: "entry-custom".to_owned(),
                     task_id: "active-custom".to_owned(),
+                    plan_id: None,
                     date: "2026-01-06".to_owned(),
                     started_at: "2026-01-06T14:00:00.000Z".to_owned(),
                     ended_at: Some("2026-01-06T15:10:00.000Z".to_owned()),
@@ -1045,6 +1341,11 @@ mod tests {
             .sort_by(|left, right| right.started_at.cmp(&left.started_at));
         data.task_daily_memos
             .sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        data.plans.sort_by(|left, right| {
+            left.date
+                .cmp(&right.date)
+                .then_with(|| left.id.cmp(&right.id))
+        });
     }
 
     async fn test_pool() -> SqlitePool {
@@ -1115,6 +1416,116 @@ mod tests {
     }
 
     #[test]
+    fn backfills_plan_identity_for_an_existing_legacy_database() {
+        tauri::async_runtime::block_on(async {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            sqlx::query(
+                "CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    days_of_week TEXT NOT NULL,
+                    duration_minutes INTEGER NOT NULL,
+                    start_ymd TEXT,
+                    auto_archive_after INTEGER,
+                    repeat_count INTEGER,
+                    is_active INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "CREATE TABLE completions (
+                    task_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    PRIMARY KEY (task_id, date)
+                )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "CREATE TABLE time_entries (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    minutes INTEGER NOT NULL
+                )",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO tasks (
+                    id, title, description, category, days_of_week,
+                    duration_minutes, start_ymd, auto_archive_after,
+                    repeat_count, is_active, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind("legacy-task")
+            .bind("Focus")
+            .bind("")
+            .bind("weekday")
+            .bind("[\"Mon\"]")
+            .bind(30_i64)
+            .bind(Option::<String>::None)
+            .bind(Option::<i64>::None)
+            .bind(Option::<i64>::None)
+            .bind(1_i64)
+            .bind("2026-01-01T00:00:00.000Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("INSERT INTO completions (task_id, date) VALUES (?, ?)")
+                .bind("legacy-task")
+                .bind("2026-01-05")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO time_entries
+                 (id, task_id, date, started_at, ended_at, minutes)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind("legacy-entry")
+            .bind("legacy-task")
+            .bind("2026-01-05")
+            .bind("2026-01-05T09:00:00.000Z")
+            .bind("2026-01-05T09:30:00.000Z")
+            .bind(30_i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            initialize_schema(&pool).await.unwrap();
+
+            let expected_id = "routine-plan:11:legacy-task:2026-01-05";
+            let loaded = load_app_data_from_pool(&pool).await.unwrap();
+            assert_eq!(loaded.plans.len(), 1);
+            assert_eq!(loaded.plans[0].id, expected_id);
+            assert_eq!(loaded.plans[0].baseline_duration_minutes, 30);
+            assert_eq!(loaded.completions[0].plan_id.as_deref(), Some(expected_id));
+            assert_eq!(loaded.time_entries[0].plan_id.as_deref(), Some(expected_id));
+
+            initialize_schema(&pool).await.unwrap();
+            let plan_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plans")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(plan_count, 1);
+        });
+    }
+
+    #[test]
     fn imports_and_loads_all_desktop_records() {
         tauri::async_runtime::block_on(async {
             let pool = test_pool().await;
@@ -1162,6 +1573,34 @@ mod tests {
 
             let mut loaded = load_app_data_from_pool(&pool).await.unwrap();
             let mut expected = data.clone();
+            for (routine_id, date, duration) in [
+                ("active-weekday", "2025-12-29", 45),
+                ("active-weekday", "2026-01-05", 45),
+                ("active-weekday", "2026-01-12", 45),
+                ("archived-weekend", "2025-12-20", 20),
+                ("active-custom", "2026-01-06", 60),
+            ] {
+                let plan_id = format!("routine-plan:{}:{}:{}", routine_id.len(), routine_id, date);
+                expected.plans.push(PlanRecord {
+                    id: plan_id.clone(),
+                    routine_id: Some(routine_id.to_owned()),
+                    date: date.to_owned(),
+                    baseline_duration_minutes: duration,
+                    duration_override_minutes: None,
+                    status: "planned".to_owned(),
+                    moved_to_ymd: None,
+                });
+                for entry in &mut expected.time_entries {
+                    if entry.task_id == routine_id && entry.date == date {
+                        entry.plan_id = Some(plan_id.clone());
+                    }
+                }
+                for completion in &mut expected.completions {
+                    if completion.task_id == routine_id && completion.date == date {
+                        completion.plan_id = Some(plan_id.clone());
+                    }
+                }
+            }
             normalize_loaded_order(&mut loaded);
             normalize_loaded_order(&mut expected);
             assert_eq!(loaded, expected);

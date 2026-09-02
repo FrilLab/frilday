@@ -1,5 +1,6 @@
 use crate::{
     ids::{RoutineId, SessionId},
+    plan::Plan,
     routine::Routine,
     session::{Session, SessionError, SessionLedger},
     time::Timestamp,
@@ -47,6 +48,18 @@ pub fn target_reached_sessions_at(
     routines: &[Routine],
     now: Timestamp,
 ) -> Result<Vec<TargetReachedSession>, SessionError> {
+    target_reached_sessions_at_with_plans(sessions, routines, &[], now)
+}
+
+/// Variant of [`target_reached_sessions_at`] that uses a date-specific Plan's
+/// effective duration when a Session references one. Legacy sessions without
+/// a Plan continue to use the Routine default.
+pub fn target_reached_sessions_at_with_plans(
+    sessions: &[Session],
+    routines: &[Routine],
+    plans: &[Plan],
+    now: Timestamp,
+) -> Result<Vec<TargetReachedSession>, SessionError> {
     let ledger = SessionLedger::try_from_sessions(sessions.to_vec())?;
     let mut reached = Vec::new();
 
@@ -62,6 +75,11 @@ pub fn target_reached_sessions_at(
             continue;
         };
         let session_date = session.date();
+        let planned_minutes = session
+            .plan_id()
+            .and_then(|plan_id| plans.iter().find(|plan| plan.id() == plan_id))
+            .map(|plan| plan.planned_duration().minutes())
+            .unwrap_or_else(|| routine.planned_duration().minutes());
 
         let completed_minutes = ledger
             .sessions()
@@ -73,14 +91,12 @@ pub fn target_reached_sessions_at(
             })
             .map(|candidate| candidate.actual_duration_at(now).minutes())
             .fold(0, u64::saturating_add);
-        if completed_minutes >= u64::from(routine.planned_duration().minutes()) {
+        if completed_minutes >= u64::from(planned_minutes) {
             continue;
         }
         let running_minutes = session.actual_duration_at(now).minutes();
 
-        if completed_minutes.saturating_add(running_minutes)
-            < u64::from(routine.planned_duration().minutes())
-        {
+        if completed_minutes.saturating_add(running_minutes) < u64::from(planned_minutes) {
             continue;
         }
 
@@ -89,7 +105,7 @@ pub fn target_reached_sessions_at(
             routine_id,
             title: routine.title().to_owned(),
             actual_minutes: completed_minutes.saturating_add(running_minutes),
-            planned_minutes: routine.planned_duration().minutes(),
+            planned_minutes,
         });
     }
 

@@ -10,10 +10,11 @@ SQLite, PostgreSQL, and serialization libraries.
   owns the title, description, planned duration, recurring schedule, start
   constraint, archive state, and optional completion/occurrence limits. It is
   not an execution record.
-- **Plan** is a date-specific intention. It may refer to a Routine, copies the
+- **Plan** is a date-specific intention. It refers to a Routine, copies the
   routine's planned duration as its baseline, and can have a date-specific
   duration override. A Plan can be skipped or moved without changing the
-  Routine.
+  Routine. Routine-derived Plans are virtual until an override, skip, or
+  execution makes the date-specific decision durable.
 - **Session** is an actual-work lifecycle. It stores a stable id, its
   associations, the local tracking date, the first start/end timestamps, the
   current active-segment start or pause timestamp, and accumulated active
@@ -28,7 +29,8 @@ SQLite, PostgreSQL, and serialization libraries.
 
 - Routine, Plan, and Session identifiers are distinct non-empty newtypes. A
   Completion uses its routine/plan/date key because legacy completion records
-  do not have a separate id.
+  do not have a separate id. New desktop completion records retain the
+  deterministic Plan id alongside the legacy routine/date key.
 - `LocalDate` is a calendar date with no time zone. Desktop v0.1 resolves the
   user's local date at the adapter boundary. `Timestamp` is an absolute Unix
   millisecond instant; adapters parse and format persisted ISO timestamps.
@@ -49,6 +51,17 @@ SQLite, PostgreSQL, and serialization libraries.
   routine/date key. Duplicate completion dates are counted once for limits.
 - Archiving changes only future schedule eligibility. Existing Plans,
   Sessions, Completions, and memo records remain historical data.
+- Routine-derived Plan identity is deterministic:
+  `routine-plan:<UTF-8 byte length>:<routine id>:<YYYY-MM-DD>`. The Plan's
+  source date is its identity; a moved Plan keeps that source date and stores
+  its destination separately. A virtual Plan is considered created when an
+  override/skip is saved, a Completion is recorded, or a Session starts. Its
+  baseline and override are then snapshots and Routine edits cannot change it.
+- The desktop adapter uses virtual resolution plus explicit Plan persistence,
+  rather than eagerly filling a planning horizon. A Session stores the Plan id
+  it started from. Legacy sessions and completions are backfilled to the
+  deterministic Routine/date Plan id on database initialization; their
+  original routine/date keys remain intact for compatibility.
 - The desktop Routine management surface edits reusable defaults as one unit:
   title, description, planned duration, recurrence, start date, and finite
   limits. It does not expose completion or timer controls as part of routine
@@ -78,11 +91,11 @@ or the `daily_check.db` filename.
 | legacy `Task.autoArchiveAfter` | `Routine.completion_limit` (app field: `completionLimit`; user-facing label: auto-archive after completions) |
 | legacy `Task.repeatCount` | `Routine.occurrence_limit` (app field: `occurrenceLimit`; user-facing label: lifetime occurrence limit; not a weekly recurrence count) |
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
-| derived scheduled Task/date slot | `Plan` when the adapter begins materializing date-specific plans |
+| derived scheduled Task/date slot | virtual `Plan`, persisted when overridden/skipped/completed/executed |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
 | `TimeEntry.startedAt`, `endedAt`, `pausedAt`, `activeStartedAt`, `accumulatedMillis` | `Session` lifecycle state |
 | `TimeEntry.minutes` | Recomputed from timestamps; retained only as a compatibility/cache field outside core |
-| `Completion.taskId`, `date` | `Completion::for_routine(RoutineId, LocalDate)` |
+| `Completion.taskId`, `planId`, `date` | `Completion::for_routine_and_plan(RoutineId, PlanId, LocalDate)`; legacy rows without `planId` use `Completion::for_routine` until migration backfills the link |
 | `TaskDailyMemo.taskId`, `date`, `text`, `updatedAt` | Adapter-owned daily memo record associated with a `Routine` and date |
 
 The desktop persistence adapter remains responsible for reading/writing these
@@ -99,6 +112,10 @@ contracts and are now represented by Rust tests and Tauri adapter tests:
   `max(createdAt in the desktop local timezone, startYmd)`. A displayed week
   contains scheduled dates plus completed dates, even when a completed date no
   longer matches the current schedule.
+- A skipped Plan is retained as a date-specific exception and is not
+  executable. Removing an override/skip deletes the exception when there is no
+  execution history, returning the date to Routine-derived behavior; once a
+  Session or Completion references the Plan, the snapshot is retained.
 - `repeatCount` is a lifetime cap on planned occurrences. Completed dates are
   retained inside the displayed period. `autoArchiveAfter` is only the
   completion threshold; it no longer silently doubles as an occurrence cap.
@@ -116,7 +133,9 @@ contracts and are now represented by Rust tests and Tauri adapter tests:
   state. Reaching the planned duration never finishes a running session, so
   overtime is retained until the user pauses or finishes it.
 - Weekly completion statistics count each active routine at most once when it
-  has any completion in the week. Period statistics count scheduled instances.
+  has any completion in the week. Period statistics count executable scheduled
+  Plan instances; skipped Plan exceptions are excluded from both period and
+  daily denominators.
   Planned and actual minute totals are aggregated separately.
 
 The explicit parity refinements from the stable domain model are that invalid

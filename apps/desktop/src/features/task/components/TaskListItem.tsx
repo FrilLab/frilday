@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type {
   Completion,
   DayOfWeek,
@@ -33,6 +33,13 @@ interface TaskListItemProps {
   memoText?: string; // (role: today memo text, type: string | undefined)
 
   onToggleToday: (task: Task) => void; // (role: toggle today's completion, type: (Task)=>void)
+  onSetPlanDuration?: (input: {
+    taskId: string;
+    date: string;
+    durationMinutes: number | null;
+  }) => void;
+  onSkipPlan?: (input: { taskId: string; date: string }) => void;
+  onRestorePlan?: (input: { taskId: string; date: string }) => void;
   onArchive: (taskId: string) => void; // (role: archive task, type: (string)=>void)
   onRestore?: (taskId: string) => void; // (role: restore handler, type: ((string)=>void) | undefined)
   onStartTimer: (task: Task) => void; // (role: start timer, type: (Task)=>void)
@@ -67,6 +74,9 @@ export function TaskListItem(props: TaskListItemProps) {
     variant,
     memoText,
     onToggleToday,
+    onSetPlanDuration,
+    onSkipPlan,
+    onRestorePlan,
     onArchive,
     onRestore,
     onStartTimer,
@@ -82,6 +92,7 @@ export function TaskListItem(props: TaskListItemProps) {
 
   const scheduledToday = taskDayState?.scheduled ?? false;
   const doneToday = taskDayState?.completed ?? false;
+  const skippedToday = taskDayState?.planStatus === 'skipped';
 
   // (role: safe description string, type: string)
   const description = (task.description ?? '').trim();
@@ -102,7 +113,17 @@ export function TaskListItem(props: TaskListItemProps) {
 
   const totalMinutesToday = taskDayState?.actualMinutes ?? 0;
 
-  const plannedMinutes = Math.max(0, task.durationMinutes || 0);
+  const plannedMinutes = Math.max(
+    0,
+    variant === 'today'
+      ? taskDayState?.plannedMinutes ?? task.durationMinutes
+      : task.durationMinutes,
+  );
+  const planHasOverride = taskDayState?.planHasOverride ?? false;
+  const [planDraft, setPlanDraft] = useState(String(plannedMinutes));
+  useEffect(() => {
+    setPlanDraft(String(plannedMinutes));
+  }, [plannedMinutes]);
   const hasTrackedTime = totalMinutesToday > 0;
 
   // Completion and tracked time are independent. A manual completion must not
@@ -115,6 +136,20 @@ export function TaskListItem(props: TaskListItemProps) {
   const progressPct = Math.round(progress01 * 100);
   const daysLabel = task.daysOfWeek.map((d) => tr(`time.day.${d}`)).join(', ');
   const categoryLabel = tr(`common.${task.category}`);
+
+  const saveTodayPlan = () => {
+    if (!onSetPlanDuration) return;
+    const duration = Number(planDraft.trim());
+    if (!Number.isInteger(duration) || duration < 1 || duration > 720) {
+      onError(tr('task.validation.durationInvalid'));
+      return;
+    }
+    onSetPlanDuration({
+      taskId: task.id,
+      date: todayYmd,
+      durationMinutes: duration,
+    });
+  };
 
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoDraft, setMemoDraft] = useState(memoText ?? '');
@@ -357,6 +392,54 @@ export function TaskListItem(props: TaskListItemProps) {
               )}>
               {progressPct}%
             </div>
+
+            {variant === 'today' &&
+              (scheduledToday || skippedToday) &&
+              onSetPlanDuration && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/50 p-2">
+                <span className="text-xs text-zinc-400">{tr('task.todayPlan')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={720}
+                  value={planDraft}
+                  onChange={(event) => setPlanDraft(event.target.value)}
+                  aria-label={tr('task.todayPlan')}
+                  className="w-20 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-right text-xs text-zinc-100 outline-none focus:border-emerald-300/60"
+                />
+                <span className="text-xs text-zinc-500">{tr('time.minuteShort')}</span>
+                <button
+                  type="button"
+                  onClick={saveTodayPlan}
+                  className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-300/20">
+                  {tr('common.save')}
+                </button>
+                {planHasOverride && !skippedToday && onRestorePlan && (
+                  <button
+                    type="button"
+                    onClick={() => onRestorePlan({ taskId: task.id, date: todayYmd })}
+                    className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+                    {tr('task.restoreRoutinePlan')}
+                  </button>
+                )}
+                {skippedToday && onRestorePlan && !open && (
+                  <button
+                    type="button"
+                    onClick={() => onRestorePlan({ taskId: task.id, date: todayYmd })}
+                    className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-300/20">
+                    {tr('task.restoreRoutinePlan')}
+                  </button>
+                )}
+                {onSkipPlan && !skippedToday && !open && (
+                  <button
+                    type="button"
+                    onClick={() => onSkipPlan({ taskId: task.id, date: todayYmd })}
+                    className="rounded-lg border border-amber-300/30 px-2 py-1 text-xs text-amber-100 hover:bg-amber-300/10">
+                    {tr('task.skipToday')}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

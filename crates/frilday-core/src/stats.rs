@@ -2,8 +2,8 @@ use crate::{
     completion::Completion,
     date::LocalDate,
     plan::Plan,
+    planning::{RoutinePlanTarget, resolve_plans},
     routine::Routine,
-    schedule::{is_eligible_on, visible_dates_between},
     session::Session,
     time::{ActualDuration, PlannedDuration, Timestamp},
 };
@@ -241,10 +241,23 @@ pub fn completion_stats_for_week(
     completions: &[Completion],
     week_start: LocalDate,
 ) -> WeeklyCompletionStats {
+    completion_stats_for_week_with_plans(targets, &[], completions, week_start)
+}
+
+/// Calculate weekly completion statistics using date-specific Plans when
+/// explicit plan records exist. The legacy one-routine-per-week contract is
+/// retained for routines without an explicit Plan in the displayed week.
+pub fn completion_stats_for_week_with_plans(
+    targets: &[RoutineStatsTarget<'_>],
+    persisted_plans: &[Plan],
+    completions: &[Completion],
+    week_start: LocalDate,
+) -> WeeklyCompletionStats {
     let week_dates = date_range(
         week_start,
         week_start.checked_add_days(6).expect("week is bounded"),
     );
+    let week_end = *week_dates.last().expect("a week contains seven dates");
     let mut total = CompletionTotals::default();
     let mut weekday = CompletionTotals::default();
     let mut weekend = CompletionTotals::default();
@@ -252,10 +265,43 @@ pub fn completion_stats_for_week(
     let mut custom = CompletionTotals::default();
 
     for target in targets.iter().filter(|target| target.routine.is_active()) {
-        let completed = completions.iter().any(|completion| {
-            completion.routine_id() == Some(target.routine.id())
-                && week_dates.contains(&completion.date())
+        let target_plan = RoutinePlanTarget {
+            routine: target.routine,
+            created_local_date: target.created_local_date,
+        };
+        let resolved = resolve_plans(
+            std::slice::from_ref(&target_plan),
+            persisted_plans,
+            completions,
+            week_start,
+            week_end,
+        );
+        let has_explicit_plan = persisted_plans.iter().any(|plan| {
+            plan.routine_id() == Some(target.routine.id())
+                && (date_in_range(plan.date(), week_start, week_end)
+                    || date_in_range(plan.effective_date(), week_start, week_end))
         });
+        let executable = resolved.iter().filter(|plan| {
+            plan.is_executable() && date_in_range(plan.effective_date(), week_start, week_end)
+        });
+        let executable_plans = executable.collect::<Vec<_>>();
+
+        // A skipped (or moved-out) explicit Plan removes the routine from the
+        // weekly denominator only when no executable occurrence remains.
+        if has_explicit_plan && executable_plans.is_empty() {
+            continue;
+        }
+
+        let completed = if has_explicit_plan {
+            executable_plans
+                .iter()
+                .any(|plan| completion_matches_plan(completions, plan))
+        } else {
+            completions.iter().any(|completion| {
+                completion.routine_id() == Some(target.routine.id())
+                    && week_dates.contains(&completion.date())
+            })
+        };
         total = add_completion(total, completed);
         match target.category {
             RoutineCategory::Weekday => weekday = add_completion(weekday, completed),
@@ -284,33 +330,60 @@ pub fn completion_stats_between(
     start: LocalDate,
     end: LocalDate,
 ) -> CompletionTotals {
+    completion_stats_between_with_plans(targets, &[], completions, start, end)
+}
+
+/// Calculate scheduled-instance completion totals from effective Plans. A
+/// skipped Plan is retained for history but is not a scheduled occurrence in
+/// completion statistics.
+pub fn completion_stats_between_with_plans(
+    targets: &[RoutineStatsTarget<'_>],
+    persisted_plans: &[Plan],
+    completions: &[Completion],
+    start: LocalDate,
+    end: LocalDate,
+) -> CompletionTotals {
     if end < start {
         return CompletionTotals::default();
     }
 
     let mut totals = CompletionTotals::default();
     for target in targets.iter().filter(|target| target.routine.is_active()) {
-        let visible_dates = visible_dates_between(
-            target.routine,
+        let target_plan = RoutinePlanTarget {
+            routine: target.routine,
+            created_local_date: target.created_local_date,
+        };
+        let resolved = resolve_plans(
+            std::slice::from_ref(&target_plan),
+            persisted_plans,
+            completions,
             start,
             end,
-            target.created_local_date,
-            completions,
         );
-        for date in visible_dates
+        for plan in resolved
             .into_iter()
-            .filter(|date| is_eligible_on(target.routine, *date, target.created_local_date))
+            .filter(|plan| plan.is_executable() && date_in_range(plan.effective_date(), start, end))
         {
             totals.scheduled_count = totals.scheduled_count.saturating_add(1);
-            if completions
-                .iter()
-                .any(|completion| completion.matches_routine_on(target.routine.id(), date))
-            {
+            if completion_matches_plan(completions, &plan) {
                 totals.completed_count = totals.completed_count.saturating_add(1);
             }
         }
     }
     totals
+}
+
+fn completion_matches_plan(completions: &[Completion], plan: &Plan) -> bool {
+    completions.iter().any(|completion| {
+        completion.matches_plan_on(plan.id(), plan.effective_date())
+            || plan.routine_id().is_some_and(|routine_id| {
+                completion.matches_routine_on(routine_id, plan.effective_date())
+            })
+    })
+}
+
+fn date_in_range(date: LocalDate, start: LocalDate, end: LocalDate) -> bool {
+    date >= start && date <= end
 }
 
 fn add_completion(mut totals: CompletionTotals, completed: bool) -> CompletionTotals {

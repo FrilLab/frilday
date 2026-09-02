@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from './runtime';
 import type {
   Completion,
+  Plan,
   Task,
   TaskDailyMemo,
   TimeEntry,
@@ -10,6 +11,7 @@ import type {
 export type PersistedAppData = {
   tasks: Task[];
   completions: Completion[];
+  plans: Plan[];
   timeEntries: TimeEntry[];
   taskDailyMemos: TaskDailyMemo[];
 };
@@ -49,6 +51,14 @@ async function saveTask(task: Task): Promise<void> {
   return invokePersistence<void>('save_task', { task });
 }
 
+async function savePlan(plan: Plan): Promise<void> {
+  return invokePersistence<void>('save_plan', { plan });
+}
+
+async function deletePlan(planId: string): Promise<void> {
+  return invokePersistence<void>('delete_plan', { planId });
+}
+
 async function setTaskActive(taskId: string, isActive: boolean): Promise<void> {
   return invokePersistence<void>('set_task_active', {
     request: { taskId, isActive },
@@ -63,9 +73,10 @@ async function setCompletion(
   taskId: string,
   date: string,
   completed: boolean,
+  planId?: string | null,
 ): Promise<void> {
   return invokePersistence<void>('set_completion', {
-    request: { taskId, date, completed },
+    request: { taskId, date, completed, planId: planId ?? null },
   });
 }
 
@@ -102,6 +113,8 @@ export const appDb = {
   load,
   importLegacy,
   saveTask,
+  savePlan,
+  deletePlan,
   setTaskActive,
   deleteTask,
   setCompletion,

@@ -26,9 +26,24 @@ export type Task = TaskBase;
 // until date-specific Plan records replace the legacy desktop shape.
 export type Routine = TaskBase;
 
+export type PlanStatus = 'planned' | 'skipped' | 'moved';
+
+// A persisted record is only created for an explicit date decision, completion,
+// or execution. Routine-derived plans may remain virtual in the UI.
+export interface Plan {
+  id: string;
+  routineId: string | null;
+  date: string;
+  baselineDurationMinutes: number;
+  durationOverrideMinutes: number | null;
+  status: PlanStatus;
+  movedToYmd: string | null;
+}
+
 // (role: completion record, type: interface)
 export interface Completion {
   taskId: string; // (role: completed task id, type: string)
+  planId?: string | null; // (role: stable date-specific plan id, type: string | null)
   date: string; // (role: YYYY-MM-DD, type: string)
 }
 
@@ -36,6 +51,7 @@ export interface Completion {
 export interface TimeEntry {
   id: string; // (role: time entry id, type: string)
   taskId: string; // (role: task id, type: string)
+  planId?: string | null; // (role: stable date-specific plan id, type: string | null)
   date: string; // (role: YYYY-MM-DD, type: string)
   startedAt: string; // (role: ISO timestamp, type: string)
   endedAt: string | null; // (role: ISO timestamp or null if running, type: string | null)
@@ -60,4 +76,8 @@ export interface TaskDayState {
   completed: boolean; // (role: completion signal, type: boolean)
   completionCount: number; // (role: all-time completion count, type: number)
   actualMinutes: number; // (role: core-derived actual minutes, type: number)
+  plannedMinutes: number; // (role: effective date-specific planned minutes, type: number)
+  planId: string | null; // (role: stable date-specific plan id, type: string | null)
+  planStatus: PlanStatus | null; // (role: date-specific plan state, type: PlanStatus | null)
+  planHasOverride: boolean; // (role: explicit date-specific duration flag, type: boolean)
 }

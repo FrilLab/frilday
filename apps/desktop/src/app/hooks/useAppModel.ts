@@ -13,6 +13,7 @@ import {
   getCoreTimeTotals,
   getRunningTaskIdWithCore,
   getVisibleScheduleSlots,
+  type CorePlan,
   type CoreStatistics,
   type CoreTimeTotals,
 } from '../../infrastructure/tauri/core';
@@ -52,6 +53,7 @@ export function useAppModel() {
     hydrated,
     tasks,
     completions,
+    plans,
     timeEntries,
     taskDailyMemos,
     targetReached,
@@ -62,6 +64,9 @@ export function useAppModel() {
     archiveTask,
     restoreTask,
     toggleToday,
+    setPlanDurationOverride,
+    skipPlan,
+    restorePlan,
     setDailyMemo,
     startTimer,
     pauseTimer,
@@ -125,6 +130,7 @@ export function useAppModel() {
     void getVisibleScheduleSlots({
       tasks,
       completions,
+      plans,
       weekStartYmd,
       includeArchived: true,
     })
@@ -139,7 +145,7 @@ export function useAppModel() {
     return () => {
       current = false;
     };
-  }, [hydrated, tasks, completions, weekStartYmd]);
+  }, [hydrated, tasks, completions, plans, weekStartYmd]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -164,6 +170,7 @@ export function useAppModel() {
     void getCoreStatistics({
       tasks,
       completions,
+      plans,
       weekStartYmd,
       todayYmd,
       monthStartYmd: monthStartYmd(todayYmd),
@@ -179,19 +186,29 @@ export function useAppModel() {
     return () => {
       current = false;
     };
-  }, [hydrated, tasks, completions, weekStartYmd, todayYmd]);
+  }, [hydrated, tasks, completions, plans, weekStartYmd, todayYmd]);
 
   const visibleToday = useMemo(() => {
     const state = new Map<
       string,
-      { visible: boolean; scheduled: boolean; completed: boolean; completionCount: number }
+      {
+        visible: boolean;
+        scheduled: boolean;
+        completed: boolean;
+        completionCount: number;
+        plan: CorePlan | null;
+      }
     >();
     for (const slot of scheduleSlots) {
+      const plan =
+        slot.plans.find((candidate) => candidate.effectiveDate === todayYmd) ??
+        null;
       state.set(slot.taskId, {
         visible: slot.dates.includes(todayYmd),
-        scheduled: slot.scheduledDates.includes(todayYmd),
+        scheduled: slot.dates.includes(todayYmd),
         completed: slot.completedDates.includes(todayYmd),
         completionCount: slot.completionCount,
+        plan,
       });
     }
     return state;
@@ -204,7 +221,10 @@ export function useAppModel() {
       // archived, so the open session remains controllable.
       if (isOpenTimer) return true;
       if (!t.isActive) return false;
-      return visibleToday.get(t.id)?.visible ?? false;
+      const todayPlan = visibleToday.get(t.id)?.plan;
+      return (
+        visibleToday.get(t.id)?.visible ?? false
+      ) || todayPlan?.status === 'skipped';
     });
     return [...filtered].sort((a, b) => {
       const aDone = visibleToday.get(a.id)?.completed ?? false;
@@ -219,6 +239,7 @@ export function useAppModel() {
     let current = true;
     void getCoreTimeTotals({
       tasks,
+      plans,
       timeEntries,
       dateYmd: todayYmd,
       nowIso,
@@ -235,7 +256,7 @@ export function useAppModel() {
     return () => {
       current = false;
     };
-  }, [hydrated, tasks, timeEntries, todayYmd, nowIso, todayTasks]);
+  }, [hydrated, tasks, plans, timeEntries, todayYmd, nowIso, todayTasks]);
 
   const taskDayStates = useMemo(() => {
     const actualMinutes = new Map(
@@ -249,6 +270,10 @@ export function useAppModel() {
         completed: visible?.completed ?? false,
         completionCount: visible?.completionCount ?? 0,
         actualMinutes: actualMinutes.get(task.id) ?? 0,
+        plannedMinutes: visible?.plan?.plannedDurationMinutes ?? 0,
+        planId: visible?.plan?.id ?? null,
+        planStatus: visible?.plan?.status ?? null,
+        planHasOverride: visible?.plan?.durationOverrideMinutes != null,
       });
     }
     return states;
@@ -292,6 +317,18 @@ export function useAppModel() {
 
     return null;
   }, [activeTimerTaskId, openTimerTaskId, tasks]);
+
+  const activeTimerPlan =
+    openTimerEntry?.planId != null
+      ? plans.find((plan) => plan.id === openTimerEntry.planId) ?? null
+      : activeTimerTask
+        ? visibleToday.get(activeTimerTask.id)?.plan ?? null
+        : null;
+  const activeTimerPlannedMinutes =
+    activeTimerPlan?.durationOverrideMinutes ??
+    activeTimerPlan?.baselineDurationMinutes ??
+    activeTimerTask?.durationMinutes ??
+    0;
 
   // Adopt a running or paused session restored from storage so it remains
   // visible and controllable instead of disappearing after app restart.
@@ -497,6 +534,7 @@ export function useAppModel() {
     // raw
     tasks,
     completions,
+    plans,
     timeEntries,
     taskDailyMemos,
     targetReached,
@@ -510,6 +548,7 @@ export function useAppModel() {
     runningTaskId,
     openTimerTaskId,
     activeTimerTask,
+    activeTimerPlannedMinutes,
     activeTimerPhase: activeTimerPhaseForView,
 
     // view state
@@ -533,6 +572,9 @@ export function useAppModel() {
     todayTasks,
     manageTasks,
     targetReachedTaskIds,
+    setPlanDurationOverride,
+    skipPlan,
+    restorePlan,
 
     // actions
     clearError,

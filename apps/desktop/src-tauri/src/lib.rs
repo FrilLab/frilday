@@ -15,6 +15,8 @@ pub fn run() {
             persistence::load_app_data,
             persistence::import_legacy_app_data,
             persistence::save_task,
+            persistence::save_plan,
+            persistence::delete_plan,
             persistence::set_task_active,
             persistence::delete_task,
             persistence::set_completion,

@@ -92,6 +92,28 @@ pub fn toggle_routine_completion(
     }
 }
 
+/// Toggle a completion while retaining the date-specific Plan identity.
+/// Legacy routine/date completions are treated as the same completion when
+/// toggling so the migration does not create duplicates.
+pub fn toggle_routine_completion_for_plan(
+    completions: &[Completion],
+    routine_id: RoutineId,
+    plan_id: PlanId,
+    date: LocalDate,
+) -> Vec<Completion> {
+    if is_completed_on(completions, &routine_id, date) {
+        completions
+            .iter()
+            .filter(|completion| !completion.matches_routine_on(&routine_id, date))
+            .cloned()
+            .collect()
+    } else {
+        let mut next = completions.to_vec();
+        next.push(Completion::for_routine_and_plan(routine_id, plan_id, date));
+        next
+    }
+}
+
 pub fn is_completed_for_plan(
     completions: &[Completion],
     plan_id: &PlanId,

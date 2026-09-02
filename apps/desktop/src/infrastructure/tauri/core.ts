@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from './runtime';
 import { toYmd } from '../../shared/utils/date';
-import type { Completion, Task, TimeEntry } from '../../shared/types';
+import type { Completion, Plan, Task, TimeEntry } from '../../shared/types';
 
 type CoreTaskInput = {
   id: string;
@@ -19,12 +19,14 @@ type CoreTaskInput = {
 
 type CoreCompletionInput = {
   taskId: string;
+  planId: string | null;
   date: string;
 };
 
 type CoreTimeEntryInput = {
   id: string;
   taskId: string;
+  planId: string | null;
   date: string;
   startedAt: string;
   endedAt: string | null;
@@ -37,12 +39,29 @@ type CoreTimeEntryInput = {
   activeStartedAtMillis: number | null;
 };
 
+type CorePlanInput = {
+  id: string;
+  routineId: string | null;
+  date: string;
+  baselineDurationMinutes: number;
+  durationOverrideMinutes: number | null;
+  status: Plan['status'];
+  movedToYmd: string | null;
+};
+
+export type CorePlan = CorePlanInput & {
+  plannedDurationMinutes: number;
+  effectiveDate: string;
+  executable: boolean;
+};
+
 export type CoreScheduleSlot = {
   taskId: string;
   dates: string[];
   scheduledDates: string[];
   completedDates: string[];
   completionCount: number;
+  plans: CorePlan[];
 };
 
 export type CoreWeeklyStats = {
@@ -114,13 +133,18 @@ function toCoreTask(task: Task): CoreTaskInput {
 }
 
 function toCoreCompletion(completion: Completion): CoreCompletionInput {
-  return { taskId: completion.taskId, date: completion.date };
+  return {
+    taskId: completion.taskId,
+    planId: completion.planId ?? null,
+    date: completion.date,
+  };
 }
 
 function toCoreTimeEntry(entry: TimeEntry): CoreTimeEntryInput {
   return {
     id: entry.id,
     taskId: entry.taskId,
+    planId: entry.planId ?? null,
     date: entry.date,
     startedAt: entry.startedAt,
     endedAt: entry.endedAt,
@@ -143,6 +167,18 @@ function toCoreTimeEntry(entry: TimeEntry): CoreTimeEntryInput {
   };
 }
 
+function toCorePlan(plan: Plan): CorePlanInput {
+  return {
+    id: plan.id,
+    routineId: plan.routineId,
+    date: plan.date,
+    baselineDurationMinutes: plan.baselineDurationMinutes,
+    durationOverrideMinutes: plan.durationOverrideMinutes,
+    status: plan.status,
+    movedToYmd: plan.movedToYmd,
+  };
+}
+
 async function invokeCore<T>(
   command: string,
   request: Record<string, unknown>,
@@ -156,12 +192,14 @@ async function invokeCore<T>(
 export async function getVisibleScheduleSlots(input: {
   tasks: Task[];
   completions: Completion[];
+  plans?: Plan[];
   weekStartYmd: string;
   includeArchived?: boolean;
 }): Promise<CoreScheduleSlot[]> {
   return invokeCore<CoreScheduleSlot[]>('core_visible_schedule', {
     tasks: input.tasks.map(toCoreTask),
     completions: input.completions.map(toCoreCompletion),
+    plans: (input.plans ?? []).map(toCorePlan),
     weekStartYmd: input.weekStartYmd,
     includeArchived: input.includeArchived ?? false,
   });
@@ -170,6 +208,7 @@ export async function getVisibleScheduleSlots(input: {
 export async function toggleCompletionWithCore(input: {
   tasks: Task[];
   completions: Completion[];
+  plans?: Plan[];
   taskId: string;
   date: string;
 }): Promise<{ completions: Completion[]; autoArchived: boolean }> {
@@ -178,6 +217,7 @@ export async function toggleCompletionWithCore(input: {
     {
       tasks: input.tasks.map(toCoreTask),
       completions: input.completions.map(toCoreCompletion),
+      plans: (input.plans ?? []).map(toCorePlan),
       taskId: input.taskId,
       date: input.date,
     },
@@ -187,6 +227,7 @@ export async function toggleCompletionWithCore(input: {
 export async function getCoreStatistics(input: {
   tasks: Task[];
   completions: Completion[];
+  plans?: Plan[];
   weekStartYmd: string;
   todayYmd: string;
   monthStartYmd: string;
@@ -194,6 +235,7 @@ export async function getCoreStatistics(input: {
   return invokeCore<CoreStatistics>('core_statistics', {
     tasks: input.tasks.map(toCoreTask),
     completions: input.completions.map(toCoreCompletion),
+    plans: (input.plans ?? []).map(toCorePlan),
     weekStartYmd: input.weekStartYmd,
     todayYmd: input.todayYmd,
     monthStartYmd: input.monthStartYmd,
@@ -202,6 +244,7 @@ export async function getCoreStatistics(input: {
 
 export async function getCoreTimeTotals(input: {
   tasks: Task[];
+  plans?: Plan[];
   timeEntries: TimeEntry[];
   dateYmd: string;
   nowIso: string;
@@ -209,6 +252,7 @@ export async function getCoreTimeTotals(input: {
 }): Promise<CoreTimeTotals> {
   return invokeCore<CoreTimeTotals>('core_time_totals', {
     tasks: input.tasks.map(toCoreTask),
+    plans: (input.plans ?? []).map(toCorePlan),
     timeEntries: input.timeEntries.map(toCoreTimeEntry),
     dateYmd: input.dateYmd,
     nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),
@@ -228,6 +272,7 @@ export async function startTimerWithCore(input: {
   timeEntries: TimeEntry[];
   sessionId: string;
   taskId: string;
+  planId?: string | null;
   dateYmd: string;
   startedAt: string;
 }): Promise<TimeEntry[]> {
@@ -236,6 +281,7 @@ export async function startTimerWithCore(input: {
       timeEntries: input.timeEntries.map(toCoreTimeEntry),
       sessionId: input.sessionId,
       taskId: input.taskId,
+      planId: input.planId ?? null,
       dateYmd: input.dateYmd,
       startedAt: input.startedAt,
       startedAtMillis: assertFiniteMillis(input.startedAt, 'startedAt'),
@@ -262,11 +308,13 @@ export async function stopTimerWithCore(input: {
 
 export async function getTargetReachedWithCore(input: {
   tasks: Task[];
+  plans?: Plan[];
   timeEntries: TimeEntry[];
   nowIso: string;
 }): Promise<CoreTargetReachedResult> {
   return invokeCore<CoreTargetReachedResult>('core_target_reached', {
     tasks: input.tasks.map(toCoreTask),
+    plans: (input.plans ?? []).map(toCorePlan),
     timeEntries: input.timeEntries.map(toCoreTimeEntry),
     nowIso: input.nowIso,
     nowMillis: assertFiniteMillis(input.nowIso, 'nowIso'),

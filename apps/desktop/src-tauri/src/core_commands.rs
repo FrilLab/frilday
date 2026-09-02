@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
-    completion_count_for_routine, completion_stats_between, completion_stats_for_week,
-    eligible_dates_between, pause_session_for_routine, resume_session_for_routine,
-    running_routine_id, start_session, stop_session_for_routine, target_reached_sessions_at,
-    toggle_routine_completion, visible_dates_between, Completion, LocalDate, Plan, PlanId,
-    PlannedDuration, Routine, RoutineCategory, RoutineId, RoutineStatsTarget, ScheduleRule,
-    Session, SessionId, Timestamp,
+    completion_count_for_routine, completion_stats_between_with_plans,
+    completion_stats_for_week_with_plans, eligible_dates_between, pause_session_for_routine,
+    resume_session_for_routine, running_routine_id, start_session, stop_session_for_routine,
+    target_reached_sessions_at_with_plans, toggle_routine_completion_for_plan, Completion,
+    LocalDate, Plan, PlanId, PlanStatus, PlannedDuration, Routine, RoutineCategory, RoutineId,
+    RoutinePlanTarget, RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,8 @@ pub struct TaskInput {
 #[serde(rename_all = "camelCase")]
 pub struct CompletionInput {
     task_id: String,
+    #[serde(default)]
+    plan_id: Option<String>,
     date: String,
 }
 
@@ -38,7 +40,35 @@ pub struct CompletionInput {
 #[serde(rename_all = "camelCase")]
 pub struct CompletionOutput {
     task_id: String,
+    plan_id: Option<String>,
     date: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanInput {
+    id: String,
+    routine_id: Option<String>,
+    date: String,
+    baseline_duration_minutes: u32,
+    duration_override_minutes: Option<u32>,
+    status: String,
+    moved_to_ymd: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanOutput {
+    id: String,
+    routine_id: Option<String>,
+    date: String,
+    baseline_duration_minutes: u32,
+    duration_override_minutes: Option<u32>,
+    planned_duration_minutes: u32,
+    status: String,
+    moved_to_ymd: Option<String>,
+    effective_date: String,
+    executable: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,6 +76,8 @@ pub struct CompletionOutput {
 pub struct TimeEntryInput {
     id: String,
     task_id: String,
+    #[serde(default)]
+    plan_id: Option<String>,
     date: String,
     started_at: String,
     ended_at: Option<String>,
@@ -68,6 +100,7 @@ pub struct TimeEntryInput {
 pub struct TimeEntryOutput {
     id: String,
     task_id: String,
+    plan_id: Option<String>,
     date: String,
     started_at: String,
     ended_at: Option<String>,
@@ -82,6 +115,8 @@ pub struct TimeEntryOutput {
 pub struct ScheduleRequest {
     tasks: Vec<TaskInput>,
     completions: Vec<CompletionInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     week_start_ymd: String,
     include_archived: bool,
 }
@@ -94,6 +129,7 @@ pub struct ScheduleSlotsOutput {
     scheduled_dates: Vec<String>,
     completed_dates: Vec<String>,
     completion_count: usize,
+    plans: Vec<PlanOutput>,
 }
 
 #[tauri::command]
@@ -107,6 +143,11 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
         .iter()
         .map(completion_from_input)
         .collect::<Result<Vec<_>, _>>()?;
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
 
     request
         .tasks
@@ -115,11 +156,19 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
         .map(|task| {
             let routine = routine_from_task(task)?;
             let created_local_date = parse_date(&task.created_local_date)?;
-            let dates =
-                visible_dates_between(&routine, start, end, created_local_date, &completions)
-                    .into_iter()
-                    .map(|date| date.to_string())
-                    .collect::<Vec<_>>();
+            let target = RoutinePlanTarget {
+                routine: &routine,
+                created_local_date,
+            };
+            let plans =
+                frilday_core::resolve_plans(&[target], &persisted_plans, &completions, start, end);
+            let dates = plans
+                .iter()
+                .filter(|plan| plan.is_executable())
+                .map(|plan| plan.effective_date())
+                .filter(|date| *date >= start && *date <= end)
+                .map(|date| date.to_string())
+                .collect::<Vec<_>>();
             let scheduled_dates = eligible_dates_between(&routine, start, end, created_local_date)
                 .into_iter()
                 .map(|date| date.to_string())
@@ -135,6 +184,7 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
                 scheduled_dates,
                 completed_dates,
                 completion_count: completion_count_for_routine(&completions, routine.id()),
+                plans: plans.iter().map(plan_to_output).collect(),
             })
         })
         .collect()
@@ -145,6 +195,8 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
 pub struct ToggleCompletionRequest {
     tasks: Vec<TaskInput>,
     completions: Vec<CompletionInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     task_id: String,
     date: String,
 }
@@ -173,7 +225,22 @@ pub fn core_toggle_completion(
         .iter()
         .map(completion_from_input)
         .collect::<Result<Vec<_>, _>>()?;
-    let next = toggle_routine_completion(&completions, routine_id, date);
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let target = RoutinePlanTarget {
+        routine: &routine,
+        created_local_date: parse_date(&task.created_local_date)?,
+    };
+    let plan_id =
+        frilday_core::resolve_plans(&[target], &persisted_plans, &completions, date, date)
+            .into_iter()
+            .find(|plan| plan.effective_date() == date && plan.is_executable())
+            .map(|plan| plan.id().clone())
+            .unwrap_or_else(|| Plan::id_for_routine(&routine_id, date));
+    let next = toggle_routine_completion_for_plan(&completions, routine_id, plan_id, date);
     let auto_archived = routine.is_active() && routine.should_auto_archive(&next);
 
     Ok(ToggleCompletionOutput {
@@ -187,6 +254,8 @@ pub fn core_toggle_completion(
 pub struct StatisticsRequest {
     tasks: Vec<TaskInput>,
     completions: Vec<CompletionInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     week_start_ymd: String,
     today_ymd: String,
     month_start_ymd: String,
@@ -235,6 +304,11 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
         .iter()
         .map(completion_from_input)
         .collect::<Result<Vec<_>, _>>()?;
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
     let all_start = completions
         .iter()
         .map(Completion::date)
@@ -258,7 +332,12 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
         })
         .collect::<Result<Vec<_>, String>>()?;
     let target_refs = targets;
-    let weekly = completion_stats_for_week(&target_refs, &completions, week_start);
+    let weekly = completion_stats_for_week_with_plans(
+        &target_refs,
+        &persisted_plans,
+        &completions,
+        week_start,
+    );
     let week_end = week_start
         .checked_add_days(6)
         .map_err(|error| error.to_string())?;
@@ -272,21 +351,30 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
             daily_rate: weekly.daily().rate(),
             custom_rate: weekly.custom().rate(),
         },
-        week_range: rate_output(completion_stats_between(
+        week_range: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
             &completions,
             week_start,
             week_end,
         )),
-        today: rate_for_date(&target_refs, &completions, week_start, today),
-        month: rate_output(completion_stats_between(
+        today: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
+            &completions,
+            today,
+            today,
+        )),
+        month: rate_output(completion_stats_between_with_plans(
+            &target_refs,
+            &persisted_plans,
             &completions,
             month_start,
             today,
         )),
-        all_time: rate_output(completion_stats_between(
+        all_time: rate_output(completion_stats_between_with_plans(
             &target_refs,
+            &persisted_plans,
             &completions,
             all_start,
             today,
@@ -302,6 +390,8 @@ pub fn core_statistics(request: StatisticsRequest) -> Result<StatisticsOutput, S
 #[serde(rename_all = "camelCase")]
 pub struct TimeTotalsRequest {
     tasks: Vec<TaskInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     time_entries: Vec<TimeEntryInput>,
     date_ymd: String,
     now_millis: i64,
@@ -336,6 +426,11 @@ pub fn core_time_totals(request: TimeTotalsRequest) -> Result<TimeTotalsOutput, 
         .iter()
         .map(routine_from_task)
         .collect::<Result<Vec<_>, _>>()?;
+    let persisted_plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
     let selected = request
         .task_ids
         .iter()
@@ -346,14 +441,17 @@ pub fn core_time_totals(request: TimeTotalsRequest) -> Result<TimeTotalsOutput, 
     let mut by_task = Vec::new();
 
     for (task, routine) in request.tasks.iter().zip(routines.iter()) {
-        if selected.contains(task.id.as_str()) && routine.schedule().matches(date.weekday()) {
-            let plan_id = PlanId::new(format!("frilday-time-{}", task.id))
-                .map_err(|error| error.to_string())?;
-            plans.push(Plan::new(
-                plan_id,
-                Some(routine.id().clone()),
+        if selected.contains(task.id.as_str()) {
+            let target = RoutinePlanTarget {
+                routine,
+                created_local_date: parse_date(&task.created_local_date)?,
+            };
+            plans.extend(frilday_core::resolve_plans(
+                &[target],
+                &persisted_plans,
+                &[],
                 date,
-                routine.planned_duration(),
+                date,
             ));
         }
         let actual_minutes = actual_minutes_for_routine(
@@ -412,6 +510,8 @@ pub struct StartTimerRequest {
     time_entries: Vec<TimeEntryInput>,
     session_id: String,
     task_id: String,
+    #[serde(default)]
+    plan_id: Option<String>,
     date_ymd: String,
     started_at: String,
     started_at_millis: i64,
@@ -435,7 +535,10 @@ pub fn core_start_timer(request: StartTimerRequest) -> Result<TimerOutput, Strin
     let new_session = Session::start(
         SessionId::new(request.session_id).map_err(|error| error.to_string())?,
         Some(task_id),
-        None,
+        request
+            .plan_id
+            .map(|id| PlanId::new(id).map_err(|error| error.to_string()))
+            .transpose()?,
         date,
         Timestamp::from_unix_millis(request.started_at_millis),
     )
@@ -577,6 +680,8 @@ pub fn core_resume_timer(request: ResumeTimerRequest) -> Result<TimerOutput, Str
 #[serde(rename_all = "camelCase")]
 pub struct TargetReachedRequest {
     tasks: Vec<TaskInput>,
+    #[serde(default)]
+    plans: Vec<PlanInput>,
     time_entries: Vec<TimeEntryInput>,
     now_millis: i64,
 }
@@ -609,9 +714,15 @@ pub fn core_target_reached(request: TargetReachedRequest) -> Result<TargetReache
         .iter()
         .map(routine_from_task)
         .collect::<Result<Vec<_>, _>>()?;
-    let reached = target_reached_sessions_at(
+    let plans = request
+        .plans
+        .iter()
+        .map(plan_from_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let reached = target_reached_sessions_at_with_plans(
         &sessions,
         &routines,
+        &plans,
         Timestamp::from_unix_millis(request.now_millis),
     )
     .map_err(|error| error.to_string())?;
@@ -671,17 +782,83 @@ fn routine_id_from_task(task_id: &str) -> Result<RoutineId, String> {
 }
 
 fn completion_from_input(input: &CompletionInput) -> Result<Completion, String> {
-    Ok(Completion::for_routine(
-        routine_id_from_task(&input.task_id)?,
-        parse_date(&input.date)?,
-    ))
+    let routine_id = routine_id_from_task(&input.task_id)?;
+    let date = parse_date(&input.date)?;
+    match input
+        .plan_id
+        .clone()
+        .map(PlanId::new)
+        .transpose()
+        .map_err(|error| error.to_string())?
+    {
+        Some(plan_id) => Ok(Completion::for_routine_and_plan(routine_id, plan_id, date)),
+        None => Ok(Completion::for_routine(routine_id, date)),
+    }
 }
 
 fn completion_to_output(completion: &Completion) -> Option<CompletionOutput> {
     completion.routine_id().map(|routine_id| CompletionOutput {
         task_id: routine_id.to_string(),
+        plan_id: completion.plan_id().map(ToString::to_string),
         date: completion.date().to_string(),
     })
+}
+
+fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
+    let baseline_duration = PlannedDuration::from_minutes(input.baseline_duration_minutes)
+        .ok_or_else(|| "plan baseline duration must be positive".to_owned())?;
+    let duration_override = input
+        .duration_override_minutes
+        .map(|minutes| {
+            PlannedDuration::from_minutes(minutes)
+                .ok_or_else(|| "plan duration override must be positive".to_owned())
+        })
+        .transpose()?;
+    let status = match input.status.as_str() {
+        "planned" => PlanStatus::Planned,
+        "skipped" => PlanStatus::Skipped,
+        "moved" => PlanStatus::MovedTo(parse_date(
+            input
+                .moved_to_ymd
+                .as_deref()
+                .ok_or_else(|| "moved plan must have a destination date".to_owned())?,
+        )?),
+        other => return Err(format!("unknown plan status: {other}")),
+    };
+    Plan::from_persisted(
+        PlanId::new(input.id.clone()).map_err(|error| error.to_string())?,
+        input
+            .routine_id
+            .clone()
+            .map(RoutineId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?,
+        parse_date(&input.date)?,
+        baseline_duration,
+        duration_override,
+        status,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn plan_to_output(plan: &Plan) -> PlanOutput {
+    let (status, moved_to_ymd) = match plan.status() {
+        PlanStatus::Planned => ("planned".to_owned(), None),
+        PlanStatus::Skipped => ("skipped".to_owned(), None),
+        PlanStatus::MovedTo(date) => ("moved".to_owned(), Some(date.to_string())),
+    };
+    PlanOutput {
+        id: plan.id().to_string(),
+        routine_id: plan.routine_id().map(ToString::to_string),
+        date: plan.date().to_string(),
+        baseline_duration_minutes: plan.baseline_duration().minutes(),
+        duration_override_minutes: plan.duration_override().map(PlannedDuration::minutes),
+        planned_duration_minutes: plan.planned_duration().minutes(),
+        status,
+        effective_date: plan.effective_date().to_string(),
+        moved_to_ymd,
+        executable: plan.is_executable(),
+    }
 }
 
 fn session_from_input(input: &TimeEntryInput) -> Result<Session, String> {
@@ -707,7 +884,12 @@ fn session_from_input(input: &TimeEntryInput) -> Result<Session, String> {
     Session::from_persisted(
         SessionId::new(input.id.clone()).map_err(|error| error.to_string())?,
         Some(routine_id_from_task(&input.task_id)?),
-        None,
+        input
+            .plan_id
+            .clone()
+            .map(PlanId::new)
+            .transpose()
+            .map_err(|error| error.to_string())?,
         parse_date(&input.date)?,
         started_at,
         ended_at,
@@ -754,6 +936,7 @@ fn sessions_to_outputs(
             Some(TimeEntryOutput {
                 id: session.id().to_string(),
                 task_id,
+                plan_id: session.plan_id().map(ToString::to_string),
                 date: session.date().to_string(),
                 started_at,
                 ended_at,
@@ -766,49 +949,6 @@ fn sessions_to_outputs(
             })
         })
         .collect()
-}
-
-fn rate_for_date(
-    targets: &[RoutineStatsTarget<'_>],
-    completions: &[Completion],
-    week_start: LocalDate,
-    date: LocalDate,
-) -> RateOutput {
-    let week_end = week_start.checked_add_days(6).expect("week is bounded");
-    let mut scheduled_count = 0;
-    let mut completed_count = 0;
-    for target in targets.iter().filter(|target| target.routine.is_active()) {
-        if !target.routine.schedule().matches(date.weekday()) {
-            continue;
-        }
-        if !visible_dates_between(
-            target.routine,
-            week_start,
-            week_end,
-            target.created_local_date,
-            completions,
-        )
-        .contains(&date)
-        {
-            continue;
-        }
-        scheduled_count += 1;
-        if completions
-            .iter()
-            .any(|completion| completion.matches_routine_on(target.routine.id(), date))
-        {
-            completed_count += 1;
-        }
-    }
-    RateOutput {
-        scheduled_count,
-        completed_count,
-        rate: if scheduled_count == 0 {
-            0.0
-        } else {
-            completed_count as f64 * 100.0 / scheduled_count as f64
-        },
-    }
 }
 
 fn rate_output(totals: frilday_core::CompletionTotals) -> RateOutput {

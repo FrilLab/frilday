@@ -55,6 +55,7 @@ function statusLabel(
 
 export interface ActiveTimerProps {
   task: Pick<Task, 'id' | 'title' | 'durationMinutes'>;
+  plannedMinutes?: number;
   timeEntries: readonly TimeEntry[];
   dateYmd: string;
   nowIso: string;
@@ -82,7 +83,7 @@ export function ActiveTimer(props: ActiveTimerProps) {
   const titleId = `active-timer-title-${props.task.id}`;
   const view = getActiveTimerViewModel({
     phase: props.phase,
-    plannedMinutes: props.task.durationMinutes,
+    plannedMinutes: props.plannedMinutes ?? props.task.durationMinutes,
     actualElapsedSeconds,
   });
   const progressPercent = Math.round(view.progressRatio * 100);
