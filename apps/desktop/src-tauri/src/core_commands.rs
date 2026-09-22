@@ -4,8 +4,8 @@ use frilday_core::{
     actual_minutes_for_routine, aggregate_for_date, completed_dates_between,
     completion_count_for_routine, completion_stats_between_with_plans,
     completion_stats_for_week_with_plans, eligible_dates_between, pause_session_for_routine,
-    resume_session_for_routine, review_for_range, running_routine_id, start_session,
-    stop_session_for_routine, target_reached_sessions_at_with_plans,
+    resolve_external_plans, resume_session_for_routine, review_for_range, running_routine_id,
+    start_session, stop_session_for_routine, target_reached_sessions_at_with_plans,
     toggle_routine_completion_for_plan, Completion, ExternalPlanAvailability, ExternalPlanIdentity,
     LocalDate, Plan, PlanId, PlanSource, PlanStatus, PlannedDuration, ReviewDay, ReviewPeriod,
     ReviewTotals, Routine, RoutineCategory, RoutineId, RoutinePlanTarget, RoutineStatsTarget,
@@ -193,7 +193,7 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
         .map(plan_from_input)
         .collect::<Result<Vec<_>, _>>()?;
 
-    request
+    let mut slots = request
         .tasks
         .iter()
         .filter(|task| request.include_archived || task.is_active)
@@ -231,7 +231,31 @@ pub fn core_visible_schedule(request: ScheduleRequest) -> Result<Vec<ScheduleSlo
                 plans: plans.iter().map(plan_to_output).collect(),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+
+    for plan in frilday_core::resolve_external_plans(&persisted_plans, start, end) {
+        let effective_date = plan.effective_date();
+        let executable = plan.is_executable();
+        let completed = completions
+            .iter()
+            .any(|completion| completion.matches_plan_on(plan.id(), effective_date));
+        slots.push(ScheduleSlotsOutput {
+            task_id: plan.id().to_string(),
+            dates: executable
+                .then_some(vec![effective_date.to_string()])
+                .unwrap_or_default(),
+            scheduled_dates: executable
+                .then_some(vec![effective_date.to_string()])
+                .unwrap_or_default(),
+            completed_dates: completed
+                .then_some(vec![effective_date.to_string()])
+                .unwrap_or_default(),
+            completion_count: usize::from(completed),
+            plans: vec![plan_to_output(&plan)],
+        });
+    }
+
+    Ok(slots)
 }
 
 #[tauri::command]
@@ -629,6 +653,26 @@ pub fn core_time_totals(request: TimeTotalsRequest) -> Result<TimeTotalsOutput, 
         );
         by_task.push(TaskTimeOutput {
             task_id: task.id.clone(),
+            actual_minutes,
+        });
+    }
+
+    let external_plans = resolve_external_plans(&persisted_plans, date, date);
+    for plan in external_plans {
+        if !selected.contains(plan.id().as_str()) {
+            continue;
+        }
+        let routine_id =
+            RoutineId::new(plan.id().to_string()).map_err(|error| error.to_string())?;
+        let actual_minutes = actual_minutes_for_routine(
+            &sessions,
+            &routine_id,
+            date,
+            Timestamp::from_unix_millis(request.now_millis),
+        );
+        plans.push(plan);
+        by_task.push(TaskTimeOutput {
+            task_id: routine_id.to_string(),
             actual_minutes,
         });
     }

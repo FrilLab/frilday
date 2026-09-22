@@ -152,7 +152,7 @@ export default function App() {
 
             {m.tab === 'schedule' && (
               <SchedulePage
-                tasks={m.tasks}
+                tasks={m.displayTasks}
                 completions={m.completions}
                 plans={m.plans}
                 getMemoText={m.getMemoText}

@@ -109,6 +109,16 @@ export const ja = {
       'MVPルール: 週内で1回以上チェックがあれば、そのタスクは週の完了として計算されます。',
   },
 
+  plan: {
+    source: {
+      googleCalendar: 'Google カレンダー',
+      googleCalendarUnavailable: 'Google カレンダー · 利用不可',
+      importedEvent: '取り込んだカレンダー予定',
+      providerOwnedHint:
+        'Google カレンダーから取り込んだ予定です。編集は Google カレンダーで行い、FrilDay の実行とレビューは引き続き利用できます。',
+    },
+  },
+
   time: {
     durationMin: '時間 (分)',
     basedOnTodayPlannedMinutes: '今日の予定時間(分)を基準にしています。',
@@ -276,15 +286,21 @@ export const ja = {
     },
     googleCalendar: {
       title: 'Google カレンダー',
-      desc: '選択したカレンダーから予定時間を読み込みます。読み取り専用権限のみを要求し、Google カレンダーには書き込みません。',
+      desc: '選択したカレンダーから予定時間を読み込みます。[frilday] で始まるタイトル、または FrilDay という名前の選択カレンダーの予定が対象です。読み取り専用権限のみを要求し、Google カレンダーには書き込みません。',
       scope: 'カレンダー読み取り専用権限',
       connect: 'Google カレンダーを接続',
       reconnect: 'Google カレンダーを再接続',
       disconnect: '接続を解除',
       refresh: 'カレンダーを更新',
       syncNow: '今すぐ同期',
+      syncing: 'カレンダーを同期中…',
+      connecting: '接続中…',
+      disconnecting: '接続を解除中…',
+      refreshing: 'カレンダーを更新中…',
+      saving: '選択を保存中…',
       syncComplete: '取り込んだイベント {imported} 件を同期し、ソース変更 {removed} 件を反映しました。',
       lastSync: '最終同期:',
+      neverSynced: '完了したカレンダー同期はまだありません。',
       lastSyncError: '最終同期エラー',
       connected: '接続済み',
       disconnected: '未接続',

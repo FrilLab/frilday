@@ -781,6 +781,29 @@ mod tests {
     }
 
     #[test]
+    fn external_plans_contribute_to_period_and_weekly_completion_totals() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let identity =
+            ExternalPlanIdentity::new("google", "calendar-1", "event-1", None::<String>).unwrap();
+        let plan = Plan::from_external(identity, date, PlannedDuration::from_minutes(45).unwrap());
+        let completion = Completion::for_plan(plan.id().clone(), date);
+
+        let period = completion_stats_between_with_plans(
+            &[],
+            std::slice::from_ref(&plan),
+            std::slice::from_ref(&completion),
+            date,
+            date,
+        );
+        assert_eq!(period.scheduled_count(), 1);
+        assert_eq!(period.completed_count(), 1);
+
+        let weekly = completion_stats_for_week_with_plans(&[], &[plan], &[completion], date);
+        assert_eq!(weekly.total().scheduled_count(), 1);
+        assert_eq!(weekly.total().completed_count(), 1);
+    }
+
+    #[test]
     fn unavailable_external_plan_preserves_actual_history_without_future_plan_time() {
         let date = LocalDate::parse("2026-01-05").unwrap();
         let identity =

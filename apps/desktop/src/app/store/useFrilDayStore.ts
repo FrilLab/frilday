@@ -31,6 +31,11 @@ import { getNotifier } from '../di/notifierDI';
 import { upsertDailyMemo } from '../../domain/memo';
 import { createRoutinePlan, routinePlanId } from '../../domain/plan/plan';
 import {
+  effectivePlanDate,
+  externalPlanToTask,
+  isExternalPlan,
+} from '../../domain/plan/externalPlan';
+import {
   getTargetReachedWithCore,
   hasVirtualPlanOnDateWithCore,
   pauseTimerWithCore,
@@ -607,6 +612,45 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
     enqueueCompletionToggle(async () => {
       const date = toYmd(today);
 
+      const externalPlan = get().plans.find(
+        (plan) => plan.id === taskId && isExternalPlan(plan),
+      );
+      if (externalPlan) {
+        if (
+          effectivePlanDate(externalPlan) !== date ||
+          externalPlan.source?.availability !== 'present'
+        ) {
+          set({ errorMsg: 'This imported Plan is not available today.' });
+          return;
+        }
+
+        const completed = !get().completions.some(
+          (completion) =>
+            completion.taskId === taskId &&
+            completion.planId === externalPlan.id &&
+            completion.date === date,
+        );
+        const nextCompletions = completed
+          ? [
+              ...get().completions,
+              { taskId, planId: externalPlan.id, date },
+            ]
+          : get().completions.filter(
+              (completion) =>
+                !(
+                  completion.taskId === taskId &&
+                  completion.planId === externalPlan.id &&
+                  completion.date === date
+                ),
+            );
+        set({ completions: nextCompletions, errorMsg: '' });
+        persist(
+          () => setCompletion(taskId, date, completed, completed ? externalPlan.id : null),
+          'Failed to update imported Plan completion.',
+        );
+        return;
+      }
+
       try {
         const result = await toggleCompletionWithCore({
           tasks: get().tasks,
@@ -719,9 +763,19 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
       const resuming = openEntry?.taskId === taskId && openEntry.pausedAt != null;
 
       try {
-        const task = get().tasks.find((candidate) => candidate.id === taskId);
+        const storedTask = get().tasks.find((candidate) => candidate.id === taskId);
+        const externalPlan = get().plans.find(
+          (plan) => plan.id === taskId && isExternalPlan(plan),
+        );
+        const task =
+          storedTask ??
+          (externalPlan
+            ? externalPlanToTask(externalPlan)
+            : null);
         if (!task) throw new Error('Task not found.');
-        const sourcePlanId = routinePlanId(taskId, date);
+        const sourcePlanId = externalPlan
+          ? externalPlan.id
+          : routinePlanId(taskId, date);
         const sourcePlan = get().plans.find((plan) => plan.id === sourcePlanId);
         if (
           sourcePlan?.status === 'moved' &&
@@ -729,12 +783,14 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
         ) {
           throw new Error('Moved plans cannot be started on their source date.');
         }
-        const movedPlan = get().plans.find(
-          (plan) =>
-            plan.routineId === taskId &&
-            plan.status === 'moved' &&
-            plan.movedToYmd === date,
-        );
+        const movedPlan = externalPlan
+          ? undefined
+          : get().plans.find(
+              (plan) =>
+                plan.routineId === taskId &&
+                plan.status === 'moved' &&
+                plan.movedToYmd === date,
+            );
         const existingPlan = movedPlan ?? sourcePlan;
         const executionPlan =
           existingPlan ??
@@ -743,6 +799,15 @@ export const useFrilDayStore = create<FrilDayState>((set, get) => ({
             date,
             baselineDurationMinutes: task.durationMinutes,
           });
+        if (
+          externalPlan &&
+          externalPlan.source?.availability !== 'present'
+        ) {
+          throw new Error('This imported Plan is no longer available.');
+        }
+        if (externalPlan && effectivePlanDate(externalPlan) !== date) {
+          throw new Error('This imported Plan is not scheduled for today.');
+        }
         if (executionPlan.status === 'skipped') {
           throw new Error('Skipped plans cannot be started.');
         }

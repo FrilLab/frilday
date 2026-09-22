@@ -110,6 +110,16 @@ export const ko = {
       'MVP 규칙: 한 주 내에 1회 이상 체크되면 해당 작업은 주간 완료로 계산됩니다.',
   },
 
+  plan: {
+    source: {
+      googleCalendar: 'Google Calendar',
+      googleCalendarUnavailable: 'Google Calendar · 사용할 수 없음',
+      importedEvent: '가져온 캘린더 일정',
+      providerOwnedHint:
+        'Google Calendar에서 가져온 일정입니다. 편집은 Google Calendar에서 하고, FrilDay 실행과 리뷰는 계속 사용할 수 있습니다.',
+    },
+  },
+
   time: {
     durationMin: '시간 (분)',
     basedOnTodayPlannedMinutes: '오늘 계획된 시간(분) 기준입니다.',
@@ -275,15 +285,21 @@ export const ko = {
     },
     googleCalendar: {
       title: 'Google Calendar',
-      desc: '선택한 캘린더에서 계획 시간을 가져옵니다. 읽기 전용 권한만 요청하며 Google Calendar에 쓰지 않습니다.',
+      desc: '선택한 캘린더에서 계획 시간을 가져옵니다. 제목이 [frilday]로 시작하거나 FrilDay라는 선택 캘린더의 일정이 포함됩니다. 읽기 전용 권한만 요청하며 Google Calendar에 쓰지 않습니다.',
       scope: '읽기 전용 캘린더 권한',
       connect: 'Google Calendar 연결',
       reconnect: 'Google Calendar 다시 연결',
       disconnect: '연결 해제',
       refresh: '캘린더 새로고침',
       syncNow: '지금 동기화',
+      syncing: '캘린더 동기화 중…',
+      connecting: '연결 중…',
+      disconnecting: '연결 해제 중…',
+      refreshing: '캘린더 새로고침 중…',
+      saving: '선택 저장 중…',
       syncComplete: '가져온 이벤트 {imported}개를 동기화했고, 소스 변경 {removed}개를 반영했습니다.',
       lastSync: '마지막 동기화:',
+      neverSynced: '아직 완료된 캘린더 동기화가 없습니다.',
       lastSyncError: '마지막 동기화 오류',
       connected: '연결됨',
       disconnected: '연결되지 않음',

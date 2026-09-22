@@ -111,6 +111,16 @@ export const en = {
       'MVP rule: A task counts as completed for the week if it has at least one check within the week.',
   },
 
+  plan: {
+    source: {
+      googleCalendar: 'Google Calendar',
+      googleCalendarUnavailable: 'Google Calendar · unavailable',
+      importedEvent: 'Imported calendar event',
+      providerOwnedHint:
+        'Imported from Google Calendar. Edit it in Google Calendar; FrilDay execution and review remain available.',
+    },
+  },
+
   time: {
     durationMin: 'Duration (min)',
     basedOnTodayPlannedMinutes: "Based on today's planned minutes.",
@@ -278,15 +288,21 @@ export const en = {
     },
     googleCalendar: {
       title: 'Google Calendar',
-      desc: 'Import planned time from selected calendars. FrilDay requests read-only access and never writes to Google Calendar.',
+      desc: 'Import planned time from selected calendars. [frilday] titles and events in a selected calendar named FrilDay are included. FrilDay requests read-only access and never writes to Google Calendar.',
       scope: 'Read-only calendar access',
       connect: 'Connect Google Calendar',
       reconnect: 'Reconnect Google Calendar',
       disconnect: 'Disconnect',
       refresh: 'Refresh calendars',
       syncNow: 'Sync now',
+      syncing: 'Syncing calendars…',
+      connecting: 'Connecting…',
+      disconnecting: 'Disconnecting…',
+      refreshing: 'Refreshing calendars…',
+      saving: 'Saving selection…',
       syncComplete: 'Synced {imported} imported events; {removed} source changes reconciled.',
       lastSync: 'Last sync:',
+      neverSynced: 'No calendar sync has completed yet.',
       lastSyncError: 'Last sync error',
       connected: 'Connected',
       disconnected: 'Not connected',
