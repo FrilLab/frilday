@@ -10,6 +10,7 @@
     "store:default",
     "sql:default",
     "sql:allow-execute",
-    "notification:default"
+    "notification:default",
+    "opener:default"
   ]
 }

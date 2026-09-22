@@ -82,6 +82,35 @@ deterministic source identity to avoid duplicates and retains an unavailable
 Plan when an upstream event disappears so Sessions and Completions remain
 reviewable.
 
+### Google Calendar connection boundary
+
+The desktop Google Calendar adapter keeps authentication and provider
+configuration outside both React state and `frilday-core`:
+
+```text
+Settings UI
+    ↓ typed Tauri command
+Rust Google adapter ── OAuth 2.0 PKCE + loopback callback ── Google
+    ├─ OS credential store: access/refresh token
+    └─ SQLite settings_kv: selected calendar ids and cached choices
+```
+
+The adapter requests only Google's focused read-only scopes:
+`calendar.calendarlist.readonly` to show source choices and
+`calendar.events.readonly` for the later event import boundary. It uses a
+desktop OAuth client id supplied through `FRILDAY_GOOGLE_CLIENT_ID` at runtime
+or build time; no client secret or token is committed. Access and refresh
+tokens are stored through the platform credential store (macOS Keychain,
+Windows Credential Manager, or Linux Secret Service) and are never returned to
+React, written to `frilday-core`, or included in logs.
+
+The persisted non-secret configuration is versioned as
+`integration.googleCalendar.config.v1`. Disconnect removes the local
+credential and selection but never deletes Plans, Sessions, or Completions.
+Expired or revoked credentials transition to a reconnect-required state.
+Network, permission, and provider failures are surfaced in Settings while the
+local timer and existing FrilDay data remain usable.
+
 ### Future server delivery
 
 ```text

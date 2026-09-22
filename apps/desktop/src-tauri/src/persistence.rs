@@ -222,7 +222,7 @@ struct SettingRow {
     value: String,
 }
 
-async fn database_pool(db_instances: &DbInstances) -> Result<SqlitePool, String> {
+pub(crate) async fn database_pool(db_instances: &DbInstances) -> Result<SqlitePool, String> {
     let instances = db_instances.0.read().await;
     match instances.get(DB_URL) {
         Some(DbPool::Sqlite(pool)) => Ok(pool.clone()),
