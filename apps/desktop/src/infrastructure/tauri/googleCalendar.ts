@@ -15,6 +15,8 @@ export type GoogleCalendarViewState = {
   reauthorizationRequired: boolean;
   selectedCalendarIds: string[];
   calendars: GoogleCalendarSummary[];
+  lastSyncAt: string | null;
+  lastSyncError: string | null;
 };
 
 export type GoogleCalendarImportOutput = {
@@ -23,6 +25,9 @@ export type GoogleCalendarImportOutput = {
   planCount: number;
   startYmd: string;
   endYmd: string;
+  incrementalCalendarCount: number;
+  fullRescanCalendarCount: number;
+  removedEventCount: number;
 };
 
 const DISCONNECTED_STATE: GoogleCalendarViewState = {
@@ -31,6 +36,8 @@ const DISCONNECTED_STATE: GoogleCalendarViewState = {
   reauthorizationRequired: false,
   selectedCalendarIds: [],
   calendars: [],
+  lastSyncAt: null,
+  lastSyncError: null,
 };
 
 function requireDesktop(): void {

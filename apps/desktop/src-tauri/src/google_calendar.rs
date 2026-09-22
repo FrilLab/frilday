@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -21,7 +21,9 @@ use url::Url;
 
 use crate::{
     external_calendar::{
-        reconcile_external_plan_records, ExternalImportWindow, NormalizedExternalEvent,
+        mark_external_plan_records_unavailable_for_selection,
+        reconcile_external_plan_records_with_changes, ExternalEventChange, ExternalImportWindow,
+        NormalizedExternalEvent,
     },
     persistence::{database_pool, load_app_data_from_pool, save_plan_records},
 };
@@ -58,6 +60,8 @@ pub struct GoogleCalendarViewState {
     pub reauthorization_required: bool,
     pub selected_calendar_ids: Vec<String>,
     pub calendars: Vec<GoogleCalendarSummary>,
+    pub last_sync_at: Option<String>,
+    pub last_sync_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,6 +85,16 @@ pub struct GoogleCalendarImportOutput {
     pub plan_count: usize,
     pub start_ymd: String,
     pub end_ymd: String,
+    pub incremental_calendar_count: usize,
+    pub full_rescan_calendar_count: usize,
+    pub removed_event_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+struct GoogleCalendarSyncState {
+    #[serde(default)]
+    next_sync_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,6 +108,12 @@ struct GoogleCalendarConfig {
     calendars: Vec<GoogleCalendarSummary>,
     #[serde(default = "default_auth_status")]
     auth_status: String,
+    #[serde(default)]
+    sync_states: HashMap<String, GoogleCalendarSyncState>,
+    #[serde(default)]
+    last_sync_at: Option<String>,
+    #[serde(default)]
+    last_sync_error: Option<String>,
 }
 
 impl Default for GoogleCalendarConfig {
@@ -103,6 +123,9 @@ impl Default for GoogleCalendarConfig {
             import_mode: default_import_mode(),
             calendars: Vec::new(),
             auth_status: default_auth_status(),
+            sync_states: HashMap::new(),
+            last_sync_at: None,
+            last_sync_error: None,
         }
     }
 }
@@ -185,6 +208,8 @@ struct GoogleCalendarEventsResponse {
     items: Vec<GoogleCalendarEventDto>,
     #[serde(default)]
     next_page_token: Option<String>,
+    #[serde(default)]
+    next_sync_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,6 +254,7 @@ enum GoogleCalendarError {
     PermissionDenied,
     ProviderUnavailable,
     InvalidProviderResponse,
+    SyncTokenExpired,
     InvalidSelection,
     CallbackFailed,
     Database(String),
@@ -266,6 +292,7 @@ impl std::fmt::Display for GoogleCalendarError {
             Self::InvalidProviderResponse => {
                 "Google Calendar returned an unexpected response. Try reconnecting."
             }
+            Self::SyncTokenExpired => "Google Calendar sync state expired. FrilDay will rescan it.",
             Self::InvalidSelection => {
                 "Select only calendars that are available for Google Calendar import."
             }
@@ -425,6 +452,8 @@ fn view_state(
             || (token.is_none() && config.auth_status == "connected"),
         selected_calendar_ids: config.selected_calendar_ids,
         calendars: config.calendars,
+        last_sync_at: config.last_sync_at,
+        last_sync_error: config.last_sync_error,
     }
 }
 
@@ -596,22 +625,19 @@ fn event_endpoint(calendar_id: &str) -> Result<Url, GoogleCalendarError> {
     Ok(endpoint)
 }
 
-fn query_boundary(date: LocalDate, offset_days: i32) -> Result<String, GoogleCalendarError> {
-    let date = date
-        .checked_add_days(offset_days)
-        .map_err(|_| GoogleCalendarError::InvalidProviderResponse)?;
-    Ok(format!("{date}T00:00:00Z"))
+#[derive(Debug)]
+struct GoogleCalendarEventBatch {
+    events: Vec<GoogleCalendarEventDto>,
+    next_sync_token: String,
 }
 
 async fn list_events(
     client: &Client,
     access_token: &str,
     calendar_id: &str,
-    window: ExternalImportWindow,
-) -> Result<Vec<GoogleCalendarEventDto>, GoogleCalendarError> {
+    sync_token: Option<&str>,
+) -> Result<GoogleCalendarEventBatch, GoogleCalendarError> {
     let endpoint = event_endpoint(calendar_id)?;
-    let time_min = query_boundary(window.start, -2)?;
-    let time_max = query_boundary(window.end, 2)?;
     let mut events = Vec::new();
     let mut page_token: Option<String> = None;
 
@@ -620,13 +646,13 @@ async fn list_events(
             .get(endpoint.clone())
             .bearer_auth(access_token)
             .query(&[
-                ("timeMin", time_min.as_str()),
-                ("timeMax", time_max.as_str()),
                 ("singleEvents", "true"),
                 ("showDeleted", "true"),
-                ("orderBy", "startTime"),
                 ("maxResults", "2500"),
             ]);
+        if let Some(token) = sync_token {
+            request = request.query(&[("syncToken", token)]);
+        }
         if let Some(token) = page_token.as_deref() {
             request = request.query(&[("pageToken", token)]);
         }
@@ -637,6 +663,9 @@ async fn list_events(
             .map_err(|_| GoogleCalendarError::NetworkUnavailable)?;
         if response.status() == StatusCode::UNAUTHORIZED {
             return Err(GoogleCalendarError::ReauthorizationRequired);
+        }
+        if response.status() == StatusCode::GONE {
+            return Err(GoogleCalendarError::SyncTokenExpired);
         }
         if !response.status().is_success() {
             return Err(provider_error(&response));
@@ -649,35 +678,82 @@ async fn list_events(
         events.extend(page.items);
         page_token = page.next_page_token;
         if page_token.is_none() {
-            return Ok(events);
+            return page
+                .next_sync_token
+                .map(|next_sync_token| GoogleCalendarEventBatch {
+                    events,
+                    next_sync_token,
+                })
+                .ok_or(GoogleCalendarError::InvalidProviderResponse);
         }
     }
 
     Err(GoogleCalendarError::InvalidProviderResponse)
 }
 
-fn occurrence_id(event: &GoogleCalendarEventDto) -> Option<String> {
-    event.recurring_event_id.as_ref()?;
-    event
-        .original_start_time
-        .as_ref()
-        .and_then(|start| start.date_time.clone().or_else(|| start.date.clone()))
-        .or_else(|| Some(event.id.clone()))
+async fn sync_calendar_events(
+    client: &Client,
+    access_token: &str,
+    calendar_id: &str,
+    sync_token: Option<&str>,
+) -> Result<(GoogleCalendarEventBatch, bool), GoogleCalendarError> {
+    match list_events(client, access_token, calendar_id, sync_token).await {
+        Ok(batch) => Ok((batch, sync_token.is_none())),
+        Err(GoogleCalendarError::SyncTokenExpired) if sync_token.is_some() => {
+            let batch = list_events(client, access_token, calendar_id, None).await?;
+            Ok((batch, true))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn event_identity(event: &GoogleCalendarEventDto) -> Option<(String, Option<String>)> {
+    let event_id = event
+        .recurring_event_id
+        .clone()
+        .unwrap_or_else(|| event.id.clone());
+    if event_id.trim().is_empty() {
+        return None;
+    }
+    let occurrence_id = event.recurring_event_id.as_ref().and_then(|_| {
+        event
+            .original_start_time
+            .as_ref()
+            .and_then(|start| start.date_time.clone().or_else(|| start.date.clone()))
+            .or_else(|| Some(event.id.clone()))
+    });
+    Some((event_id, occurrence_id))
+}
+
+fn remove_change(
+    calendar: &GoogleCalendarSummary,
+    event: &GoogleCalendarEventDto,
+) -> Option<ExternalEventChange> {
+    let (event_id, occurrence_id) = event_identity(event)?;
+    Some(ExternalEventChange::Remove {
+        provider_id: GOOGLE_PROVIDER_ID.to_owned(),
+        calendar_id: calendar.id.clone(),
+        event_id,
+        occurrence_id,
+    })
 }
 
 fn normalized_event(
     calendar: &GoogleCalendarSummary,
     event: GoogleCalendarEventDto,
-) -> Option<NormalizedExternalEvent> {
+) -> Option<ExternalEventChange> {
+    let (event_id, occurrence_id) = event_identity(&event)?;
     if event.status.as_deref() == Some("cancelled") {
-        return None;
+        return remove_change(calendar, &event);
     }
 
-    let raw_title = event.summary.as_deref()?.trim();
+    let Some(raw_title) = event.summary.as_deref().map(str::trim) else {
+        return remove_change(calendar, &event);
+    };
     let tagged = raw_title.starts_with("[frilday]");
     let dedicated = calendar.summary.trim() == "FrilDay";
     if !tagged && !dedicated {
-        return None;
+        return remove_change(calendar, &event);
     }
     let title = if tagged {
         raw_title["[frilday]".len()..].trim()
@@ -685,52 +761,82 @@ fn normalized_event(
         raw_title
     };
     if title.is_empty() {
-        return None;
+        return remove_change(calendar, &event);
     }
 
     // All-day events have no finite planned work duration. They are ignored
     // rather than inventing 24h of FrilDay intent.
-    let start =
-        DateTime::<FixedOffset>::parse_from_rfc3339(event.start.as_ref()?.date_time.as_deref()?)
-            .ok()?;
-    let end =
-        DateTime::<FixedOffset>::parse_from_rfc3339(event.end.as_ref()?.date_time.as_deref()?)
-            .ok()?;
+    let Some(start_value) = event
+        .start
+        .as_ref()
+        .and_then(|start| start.date_time.as_deref())
+    else {
+        return remove_change(calendar, &event);
+    };
+    let Some(end_value) = event.end.as_ref().and_then(|end| end.date_time.as_deref()) else {
+        return remove_change(calendar, &event);
+    };
+    let Some(start) = DateTime::<FixedOffset>::parse_from_rfc3339(start_value).ok() else {
+        return remove_change(calendar, &event);
+    };
+    let Some(end) = DateTime::<FixedOffset>::parse_from_rfc3339(end_value).ok() else {
+        return remove_change(calendar, &event);
+    };
     let duration_minutes = end.signed_duration_since(start).num_seconds() / 60;
-    let planned_duration_minutes = u32::try_from(duration_minutes).ok()?;
+    let Some(planned_duration_minutes) = u32::try_from(duration_minutes).ok() else {
+        return remove_change(calendar, &event);
+    };
     if !(1..=720).contains(&planned_duration_minutes) {
-        return None;
+        return remove_change(calendar, &event);
     }
 
-    Some(NormalizedExternalEvent {
+    Some(ExternalEventChange::Upsert(NormalizedExternalEvent {
         provider_id: GOOGLE_PROVIDER_ID.to_owned(),
         calendar_id: calendar.id.clone(),
-        event_id: event
-            .recurring_event_id
-            .clone()
-            .unwrap_or_else(|| event.id.clone()),
-        occurrence_id: occurrence_id(&event),
+        event_id,
+        occurrence_id,
         title: title.to_owned(),
         date_ymd: start.format("%Y-%m-%d").to_string(),
         planned_duration_minutes,
-    })
+    }))
 }
 
 fn normalize_events(
     calendar: &GoogleCalendarSummary,
     events: Vec<GoogleCalendarEventDto>,
     window: ExternalImportWindow,
-) -> (Vec<NormalizedExternalEvent>, usize) {
+) -> (Vec<ExternalEventChange>, usize) {
     let mut normalized = Vec::new();
     let mut skipped = 0;
     for event in events {
         match normalized_event(calendar, event) {
-            Some(event)
+            Some(ExternalEventChange::Remove {
+                provider_id,
+                calendar_id,
+                event_id,
+                occurrence_id,
+            }) => normalized.push(ExternalEventChange::Remove {
+                provider_id,
+                calendar_id,
+                event_id,
+                occurrence_id,
+            }),
+            Some(ExternalEventChange::Upsert(event))
                 if LocalDate::parse(&event.date_ymd).is_ok_and(|date| window.contains(date)) =>
             {
-                normalized.push(event);
+                normalized.push(ExternalEventChange::Upsert(event));
             }
-            _ => skipped += 1,
+            Some(ExternalEventChange::Upsert(event)) => {
+                // A moved event outside the import window must still remove
+                // the old date-specific Plan during an incremental sync.
+                normalized.push(ExternalEventChange::Remove {
+                    provider_id: event.provider_id,
+                    calendar_id: event.calendar_id,
+                    event_id: event.event_id,
+                    occurrence_id: event.occurrence_id,
+                });
+            }
+            None => skipped += 1,
         }
     }
     (normalized, skipped)
@@ -762,6 +868,11 @@ async fn refresh_calendars_with_pool(
     };
 
     let mut config = load_config(pool).await?;
+    let previous_selected = config
+        .selected_calendar_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
     let available_ids = calendars
         .iter()
         .map(|calendar| calendar.id.as_str())
@@ -769,6 +880,28 @@ async fn refresh_calendars_with_pool(
     config
         .selected_calendar_ids
         .retain(|id| available_ids.contains(id.as_str()));
+    let selected_calendar_ids = config
+        .selected_calendar_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    if previous_selected != selected_calendar_ids {
+        let app_data = load_app_data_from_pool(pool)
+            .await
+            .map_err(GoogleCalendarError::Database)?;
+        let reconciled = mark_external_plan_records_unavailable_for_selection(
+            &app_data.plans,
+            GOOGLE_PROVIDER_ID,
+            &selected_calendar_ids,
+        )
+        .map_err(GoogleCalendarError::Database)?;
+        save_plan_records(pool, &reconciled)
+            .await
+            .map_err(GoogleCalendarError::Database)?;
+        for calendar_id in previous_selected.difference(&selected_calendar_ids) {
+            config.sync_states.remove(calendar_id);
+        }
+    }
     config.calendars = calendars;
     config.auth_status = "connected".to_owned();
     save_config(pool, &config).await?;
@@ -786,7 +919,7 @@ async fn import_events_with_pool(
         .map_err(|_| GoogleCalendarError::InvalidProviderResponse)?;
     let window =
         ExternalImportWindow::new(start, end).map_err(|_| GoogleCalendarError::InvalidSelection)?;
-    let config = load_config(pool).await?;
+    let mut config = load_config(pool).await?;
     if config.selected_calendar_ids.is_empty() {
         return Err(GoogleCalendarError::InvalidSelection);
     }
@@ -804,43 +937,79 @@ async fn import_events_with_pool(
         Err(error) => return Err(error),
     };
 
-    let mut normalized = Vec::new();
+    let selected_calendar_ids = config
+        .selected_calendar_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut changes = Vec::new();
+    let mut full_rescan_calendar_ids = HashSet::new();
     let mut skipped_event_count = 0;
+    let mut incremental_calendar_count = 0;
+    let mut full_rescan_calendar_count = 0;
+    let mut removed_event_count = 0;
     for calendar_id in &config.selected_calendar_ids {
         let calendar = config
             .calendars
             .iter()
             .find(|calendar| &calendar.id == calendar_id)
             .ok_or(GoogleCalendarError::InvalidSelection)?;
-        let events = match list_events(&client, &access_token, calendar_id, window).await {
-            Ok(events) => events,
-            Err(GoogleCalendarError::ReauthorizationRequired) => {
-                let _ = delete_stored_token();
-                mark_reauthorization_required(pool).await?;
-                return Err(GoogleCalendarError::ReauthorizationRequired);
-            }
-            Err(error) => return Err(error),
-        };
-        let (events, skipped) = normalize_events(calendar, events, window);
-        normalized.extend(events);
+        let sync_token = config
+            .sync_states
+            .get(calendar_id)
+            .and_then(|state| state.next_sync_token.as_deref());
+        let (batch, full_rescan) =
+            match sync_calendar_events(&client, &access_token, calendar_id, sync_token).await {
+                Ok(batch) => batch,
+                Err(GoogleCalendarError::ReauthorizationRequired) => {
+                    let _ = delete_stored_token();
+                    mark_reauthorization_required(pool).await?;
+                    return Err(GoogleCalendarError::ReauthorizationRequired);
+                }
+                Err(error) => return Err(error),
+            };
+        if full_rescan {
+            full_rescan_calendar_ids.insert(calendar_id.clone());
+            full_rescan_calendar_count += 1;
+        } else {
+            incremental_calendar_count += 1;
+        }
+        config.sync_states.insert(
+            calendar_id.clone(),
+            GoogleCalendarSyncState {
+                next_sync_token: Some(batch.next_sync_token),
+            },
+        );
+        let (calendar_changes, skipped) = normalize_events(calendar, batch.events, window);
+        removed_event_count += calendar_changes
+            .iter()
+            .filter(|change| matches!(change, ExternalEventChange::Remove { .. }))
+            .count();
+        changes.extend(calendar_changes);
         skipped_event_count += skipped;
     }
 
     let app_data = load_app_data_from_pool(pool)
         .await
         .map_err(GoogleCalendarError::Database)?;
-    let reconciled = reconcile_external_plan_records(
+    let reconciled = reconcile_external_plan_records_with_changes(
         &app_data.plans,
-        &normalized,
+        &changes,
         &app_data.completions,
         &app_data.time_entries,
         GOOGLE_PROVIDER_ID,
+        &selected_calendar_ids,
+        &full_rescan_calendar_ids,
         window,
     )
     .map_err(GoogleCalendarError::Database)?;
     save_plan_records(pool, &reconciled)
         .await
         .map_err(GoogleCalendarError::Database)?;
+
+    config.last_sync_at = Some(DateTime::<chrono::Utc>::from(SystemTime::now()).to_rfc3339());
+    config.last_sync_error = None;
+    save_config(pool, &config).await?;
 
     let plan_count = reconciled
         .iter()
@@ -850,12 +1019,26 @@ async fn import_events_with_pool(
         })
         .count();
     Ok(GoogleCalendarImportOutput {
-        imported_event_count: normalized.len(),
+        imported_event_count: changes
+            .iter()
+            .filter(|change| matches!(change, ExternalEventChange::Upsert(_)))
+            .count(),
         skipped_event_count,
         plan_count,
         start_ymd: start.to_string(),
         end_ymd: end.to_string(),
+        incremental_calendar_count,
+        full_rescan_calendar_count,
+        removed_event_count,
     })
+}
+
+async fn record_sync_error(pool: &SqlitePool, error: &GoogleCalendarError) {
+    let Ok(mut config) = load_config(pool).await else {
+        return;
+    };
+    config.last_sync_error = Some(error.to_string());
+    let _ = save_config(pool, &config).await;
 }
 
 fn respond_to_browser(stream: &mut TcpStream, status: &str, body: &str) {
@@ -1077,9 +1260,11 @@ pub async fn google_calendar_import(
     let pool = database_pool(&db_instances)
         .await
         .map_err(|error| error.to_string())?;
-    import_events_with_pool(&pool, request)
-        .await
-        .map_err(|error| error.to_string())
+    let result = import_events_with_pool(&pool, request).await;
+    if let Err(error) = &result {
+        record_sync_error(&pool, error).await;
+    }
+    result.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1111,6 +1296,35 @@ pub async fn google_calendar_set_selection(
     {
         return Err(GoogleCalendarError::InvalidSelection.to_string());
     }
+
+    let selected_calendar_ids = request
+        .selected_calendar_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let app_data = load_app_data_from_pool(&pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    let reconciled = mark_external_plan_records_unavailable_for_selection(
+        &app_data.plans,
+        GOOGLE_PROVIDER_ID,
+        &selected_calendar_ids,
+    )
+    .map_err(|error| error.to_string())?;
+    save_plan_records(&pool, &reconciled)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let previously_selected = config
+        .selected_calendar_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    for calendar_id in previously_selected.difference(&selected_calendar_ids) {
+        // A later re-selection must perform a complete import. Keeping the
+        // old cursor could miss edits made while this source was deselected.
+        config.sync_states.remove(calendar_id);
+    }
     config.selected_calendar_ids = request.selected_calendar_ids;
     save_config(&pool, &config)
         .await
@@ -1124,6 +1338,19 @@ pub async fn google_calendar_disconnect(
     db_instances: State<'_, DbInstances>,
 ) -> Result<GoogleCalendarViewState, String> {
     let pool = database_pool(&db_instances)
+        .await
+        .map_err(|error| error.to_string())?;
+    let app_data = load_app_data_from_pool(&pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    let no_selected_calendars = HashSet::new();
+    let reconciled = mark_external_plan_records_unavailable_for_selection(
+        &app_data.plans,
+        GOOGLE_PROVIDER_ID,
+        &no_selected_calendars,
+    )
+    .map_err(|error| error.to_string())?;
+    save_plan_records(&pool, &reconciled)
         .await
         .map_err(|error| error.to_string())?;
     delete_stored_token().map_err(|error| error.to_string())?;
@@ -1163,6 +1390,16 @@ mod tests {
             }),
             recurring_event_id: None,
             original_start_time: None,
+        }
+    }
+
+    fn normalized_upsert(
+        calendar: &GoogleCalendarSummary,
+        event: GoogleCalendarEventDto,
+    ) -> NormalizedExternalEvent {
+        match normalized_event(calendar, event) {
+            Some(ExternalEventChange::Upsert(event)) => event,
+            other => panic!("expected an upsert, got {other:?}"),
         }
     }
 
@@ -1271,15 +1508,14 @@ mod tests {
 
     #[test]
     fn tagged_event_strips_the_case_sensitive_prefix_and_maps_timing() {
-        let event = normalized_event(
+        let event = normalized_upsert(
             &calendar("Work"),
             timed_event(
                 "[frilday] Rust study",
                 "2026-01-05T20:00:00+09:00",
                 "2026-01-05T21:30:00+09:00",
             ),
-        )
-        .unwrap();
+        );
 
         assert_eq!(event.title, "Rust study");
         assert_eq!(event.date_ymd, "2026-01-05");
@@ -1289,15 +1525,14 @@ mod tests {
 
     #[test]
     fn dedicated_fril_day_calendar_imports_without_a_title_prefix() {
-        let event = normalized_event(
+        let event = normalized_upsert(
             &calendar("FrilDay"),
             timed_event(
                 "Deep work",
                 "2026-01-05T23:00:00+09:00",
                 "2026-01-06T01:00:00+09:00",
             ),
-        )
-        .unwrap();
+        );
 
         assert_eq!(event.title, "Deep work");
         assert_eq!(event.date_ymd, "2026-01-05");
@@ -1306,24 +1541,28 @@ mod tests {
 
     #[test]
     fn untagged_events_from_other_calendars_are_not_imported() {
-        assert!(normalized_event(
-            &calendar("Work"),
-            timed_event(
-                "Deep work",
-                "2026-01-05T20:00:00+09:00",
-                "2026-01-05T21:00:00+09:00",
+        assert!(matches!(
+            normalized_event(
+                &calendar("Work"),
+                timed_event(
+                    "Deep work",
+                    "2026-01-05T20:00:00+09:00",
+                    "2026-01-05T21:00:00+09:00",
+                ),
             ),
-        )
-        .is_none());
-        assert!(normalized_event(
-            &calendar("work"),
-            timed_event(
-                "[FrilDay] wrong case",
-                "2026-01-05T20:00:00+09:00",
-                "2026-01-05T21:00:00+09:00",
+            Some(ExternalEventChange::Remove { .. })
+        ));
+        assert!(matches!(
+            normalized_event(
+                &calendar("work"),
+                timed_event(
+                    "[FrilDay] wrong case",
+                    "2026-01-05T20:00:00+09:00",
+                    "2026-01-05T21:00:00+09:00",
+                ),
             ),
-        )
-        .is_none());
+            Some(ExternalEventChange::Remove { .. })
+        ));
     }
 
     #[test]
@@ -1343,47 +1582,58 @@ mod tests {
             recurring_event_id: None,
             original_start_time: None,
         };
-        assert!(normalized_event(&calendar("Work"), all_day).is_none());
-        assert!(normalized_event(
-            &calendar("Work"),
-            timed_event(
-                "[frilday] zero",
-                "2026-01-05T20:00:00+09:00",
-                "2026-01-05T20:00:00+09:00",
+        assert!(matches!(
+            normalized_event(&calendar("Work"), all_day),
+            Some(ExternalEventChange::Remove { .. })
+        ));
+        assert!(matches!(
+            normalized_event(
+                &calendar("Work"),
+                timed_event(
+                    "[frilday] zero",
+                    "2026-01-05T20:00:00+09:00",
+                    "2026-01-05T20:00:00+09:00",
+                ),
             ),
-        )
-        .is_none());
-        assert!(normalized_event(
-            &calendar("Work"),
-            timed_event(
-                "[frilday] backwards",
-                "2026-01-05T20:00:00+09:00",
-                "2026-01-05T19:00:00+09:00",
+            Some(ExternalEventChange::Remove { .. })
+        ));
+        assert!(matches!(
+            normalized_event(
+                &calendar("Work"),
+                timed_event(
+                    "[frilday] backwards",
+                    "2026-01-05T20:00:00+09:00",
+                    "2026-01-05T19:00:00+09:00",
+                ),
             ),
-        )
-        .is_none());
-        assert!(normalized_event(
-            &calendar("Work"),
-            GoogleCalendarEventDto {
-                id: "cancelled".to_owned(),
-                status: Some("cancelled".to_owned()),
-                summary: None,
-                start: None,
-                end: None,
-                recurring_event_id: None,
-                original_start_time: None,
-            },
-        )
-        .is_none());
-        assert!(normalized_event(
-            &calendar("Work"),
-            timed_event(
-                "[frilday]",
-                "2026-01-05T20:00:00+09:00",
-                "2026-01-05T21:00:00+09:00",
+            Some(ExternalEventChange::Remove { .. })
+        ));
+        assert!(matches!(
+            normalized_event(
+                &calendar("Work"),
+                GoogleCalendarEventDto {
+                    id: "cancelled".to_owned(),
+                    status: Some("cancelled".to_owned()),
+                    summary: None,
+                    start: None,
+                    end: None,
+                    recurring_event_id: None,
+                    original_start_time: None,
+                },
             ),
-        )
-        .is_none());
+            Some(ExternalEventChange::Remove { .. })
+        ));
+        assert!(matches!(
+            normalized_event(
+                &calendar("Work"),
+                timed_event(
+                    "[frilday]",
+                    "2026-01-05T20:00:00+09:00",
+                    "2026-01-05T21:00:00+09:00",
+                ),
+            ),
+            Some(ExternalEventChange::Remove { .. })
+        ));
     }
 
     #[test]
@@ -1400,7 +1650,7 @@ mod tests {
             date_time: Some("2026-01-12T20:00:00+09:00".to_owned()),
         });
 
-        let normalized = normalized_event(&calendar("Work"), event).unwrap();
+        let normalized = normalized_upsert(&calendar("Work"), event);
 
         assert_eq!(normalized.event_id, "series");
         assert_eq!(

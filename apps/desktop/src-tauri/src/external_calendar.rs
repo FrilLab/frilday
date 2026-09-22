@@ -26,6 +26,22 @@ pub struct NormalizedExternalEvent {
     pub planned_duration_minutes: u32,
 }
 
+/// A provider change can either contain the current event snapshot or a
+/// tombstone. Tombstones are important for incremental feeds: an event that
+/// was cancelled, deleted, or no longer matches the import convention is not
+/// present in the provider's current payload, but its stable identity still
+/// lets us mark the existing Plan unavailable without deleting its history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalEventChange {
+    Upsert(NormalizedExternalEvent),
+    Remove {
+        provider_id: String,
+        calendar_id: String,
+        event_id: String,
+        occurrence_id: Option<String>,
+    },
+}
+
 /// Inclusive date range used by an external import. Plans outside this range
 /// are not changed when a provider is refreshed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +181,127 @@ pub fn reconcile_external_plans_in_window(
     Ok(next)
 }
 
+/// Reconcile a complete or incremental provider response.
+///
+/// `full_rescan_calendar_ids` identifies calendars for which the provider
+/// returned a complete collection. Only those calendars receive missing-item
+/// reconciliation; incremental responses must never make unrelated Plans
+/// unavailable merely because they were not included in a change feed.
+pub fn reconcile_external_plans_with_changes(
+    existing: &[Plan],
+    changes: &[ExternalEventChange],
+    completions: &[Completion],
+    sessions: &[Session],
+    provider_id: &str,
+    selected_calendar_ids: &HashSet<String>,
+    full_rescan_calendar_ids: &HashSet<String>,
+    window: ExternalImportWindow,
+) -> Result<Vec<Plan>, ExternalReconciliationError> {
+    let mut seen_ids = HashSet::<PlanId>::new();
+    let mut next = existing.to_vec();
+
+    for change in changes {
+        let (identity, incoming_plan) = match change {
+            ExternalEventChange::Upsert(event) => {
+                let identity = ExternalPlanIdentity::new(
+                    event.provider_id.clone(),
+                    event.calendar_id.clone(),
+                    event.event_id.clone(),
+                    event.occurrence_id.clone(),
+                )
+                .map_err(ExternalReconciliationError::InvalidIdentity)?;
+                let date = LocalDate::parse(&event.date_ymd)
+                    .map_err(|error| ExternalReconciliationError::InvalidDate(error.to_string()))?;
+                let duration = PlannedDuration::from_minutes(event.planned_duration_minutes)
+                    .ok_or(ExternalReconciliationError::InvalidDuration)?;
+                (
+                    identity.clone(),
+                    Some(Plan::from_external_with_title(
+                        identity,
+                        normalize_title(&event.title),
+                        date,
+                        duration,
+                    )),
+                )
+            }
+            ExternalEventChange::Remove {
+                provider_id,
+                calendar_id,
+                event_id,
+                occurrence_id,
+            } => {
+                let identity = ExternalPlanIdentity::new(
+                    provider_id.clone(),
+                    calendar_id.clone(),
+                    event_id.clone(),
+                    occurrence_id.clone(),
+                )
+                .map_err(ExternalReconciliationError::InvalidIdentity)?;
+                (identity, None)
+            }
+        };
+        let plan_id = Plan::id_for_external_source(&identity);
+        if !seen_ids.insert(plan_id.clone()) {
+            return Err(ExternalReconciliationError::DuplicateIdentity(
+                identity.stable_key(),
+            ));
+        }
+
+        if let Some(incoming_plan) = incoming_plan {
+            if !window.contains(incoming_plan.date()) {
+                continue;
+            }
+            if let Some(current) = next
+                .iter_mut()
+                .find(|plan| plan.external_identity() == Some(&identity))
+            {
+                let has_history = current.has_history(completions, sessions);
+                current.mark_source_available();
+                if !has_history {
+                    current.refresh_external_snapshot_with_title(
+                        incoming_plan.date(),
+                        incoming_plan.baseline_duration(),
+                        incoming_plan.title().map(str::to_owned),
+                    );
+                }
+            } else {
+                next.push(incoming_plan);
+            }
+        } else if let Some(current) = next
+            .iter_mut()
+            .find(|plan| plan.external_identity() == Some(&identity))
+        {
+            current.mark_source_unavailable();
+        }
+    }
+
+    for plan in &mut next {
+        let Some(identity) = plan.external_identity() else {
+            continue;
+        };
+        if identity.provider_id() != provider_id {
+            continue;
+        }
+
+        // A calendar that is no longer selected is never allowed to keep an
+        // executable imported Plan. The record stays in place for review and
+        // can be reactivated if the calendar is selected again later.
+        if !selected_calendar_ids.contains(identity.calendar_id()) {
+            plan.mark_source_unavailable();
+            continue;
+        }
+
+        if full_rescan_calendar_ids.contains(identity.calendar_id())
+            && window.contains(plan.date())
+            && !seen_ids.contains(plan.id())
+        {
+            plan.mark_source_unavailable();
+        }
+    }
+
+    Ok(next)
+}
+
 fn normalize_title(title: &str) -> Option<String> {
     let title = title.trim();
     (!title.is_empty()).then(|| title.to_owned())
@@ -179,6 +316,51 @@ pub fn reconcile_external_plan_records(
     completions: &[CompletionRecord],
     time_entries: &[TimeEntryRecord],
     provider_id: &str,
+    window: ExternalImportWindow,
+) -> Result<Vec<PlanRecord>, String> {
+    let mut selected_calendar_ids = HashSet::new();
+    for record in existing {
+        if let (Some(provider), Some(calendar)) = (
+            record.source.provider_id.as_deref(),
+            record.source.calendar_id.as_deref(),
+        ) {
+            if provider == provider_id {
+                selected_calendar_ids.insert(calendar.to_owned());
+            }
+        }
+    }
+    for event in incoming {
+        if event.provider_id == provider_id {
+            selected_calendar_ids.insert(event.calendar_id.clone());
+        }
+    }
+    let full_rescan_calendar_ids = selected_calendar_ids.clone();
+    let changes = incoming
+        .iter()
+        .cloned()
+        .map(ExternalEventChange::Upsert)
+        .collect::<Vec<_>>();
+    reconcile_external_plan_records_with_changes(
+        existing,
+        &changes,
+        completions,
+        time_entries,
+        provider_id,
+        &selected_calendar_ids,
+        &full_rescan_calendar_ids,
+        window,
+    )
+}
+
+/// Apply the same reconciliation rules to persisted desktop records.
+pub fn reconcile_external_plan_records_with_changes(
+    existing: &[PlanRecord],
+    changes: &[ExternalEventChange],
+    completions: &[CompletionRecord],
+    time_entries: &[TimeEntryRecord],
+    provider_id: &str,
+    selected_calendar_ids: &HashSet<String>,
+    full_rescan_calendar_ids: &HashSet<String>,
     window: ExternalImportWindow,
 ) -> Result<Vec<PlanRecord>, String> {
     let existing_plans = existing
@@ -215,16 +397,43 @@ pub fn reconcile_external_plan_records(
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    let reconciled = reconcile_external_plans_in_window(
+    let reconciled = reconcile_external_plans_with_changes(
         &existing_plans,
-        incoming,
+        changes,
         &history_completions,
         &history_sessions,
-        Some(provider_id),
-        Some(window),
+        provider_id,
+        selected_calendar_ids,
+        full_rescan_calendar_ids,
+        window,
     )
     .map_err(|error| error.to_string())?;
     reconciled.iter().map(plan_to_record).collect()
+}
+
+/// Mark imported Plans whose calendar is no longer selected as unavailable.
+/// This is used when selection changes or the account is disconnected; it
+/// intentionally does not delete Plans, Sessions, or Completions.
+pub fn mark_external_plan_records_unavailable_for_selection(
+    existing: &[PlanRecord],
+    provider_id: &str,
+    selected_calendar_ids: &HashSet<String>,
+) -> Result<Vec<PlanRecord>, String> {
+    existing
+        .iter()
+        .map(plan_from_record)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|mut plan| {
+            if plan.external_identity().is_some_and(|identity| {
+                identity.provider_id() == provider_id
+                    && !selected_calendar_ids.contains(identity.calendar_id())
+            }) {
+                plan.mark_source_unavailable();
+            }
+            plan_to_record(&plan)
+        })
+        .collect()
 }
 
 fn plan_from_record(record: &PlanRecord) -> Result<Plan, String> {
@@ -358,8 +567,9 @@ mod tests {
             event.occurrence_id.clone(),
         )
         .unwrap();
-        Plan::from_external(
+        Plan::from_external_with_title(
             identity,
+            Some(event.title.clone()),
             LocalDate::parse(&event.date_ymd).unwrap(),
             PlannedDuration::from_minutes(event.planned_duration_minutes).unwrap(),
         )
@@ -370,6 +580,7 @@ mod tests {
         let initial = event("2026-01-05", 30);
         let mut updated = event("2026-01-06", 45);
         updated.event_id = initial.event_id.clone();
+        updated.title = "Updated study".to_owned();
         let existing = plan_for(&initial);
 
         let reconciled =
@@ -383,7 +594,7 @@ mod tests {
             LocalDate::parse("2026-01-06").unwrap()
         );
         assert_eq!(reconciled[0].baseline_duration().minutes(), 45);
-        assert_eq!(reconciled[0].title(), Some("Rust study"));
+        assert_eq!(reconciled[0].title(), Some("Updated study"));
         assert!(reconciled[0].source().is_available());
     }
 
@@ -450,6 +661,66 @@ mod tests {
             error,
             ExternalReconciliationError::DuplicateIdentity(_)
         ));
+    }
+
+    #[test]
+    fn incremental_tombstone_only_marks_the_changed_identity_unavailable() {
+        let first = event("2026-01-05", 30);
+        let mut second = event("2026-01-06", 45);
+        second.event_id = "event-2".to_owned();
+        let existing = vec![plan_for(&first), plan_for(&second)];
+        let changes = vec![ExternalEventChange::Remove {
+            provider_id: first.provider_id.clone(),
+            calendar_id: first.calendar_id.clone(),
+            event_id: first.event_id.clone(),
+            occurrence_id: first.occurrence_id.clone(),
+        }];
+        let selected = HashSet::from(["calendar-1".to_owned()]);
+
+        let reconciled = reconcile_external_plans_with_changes(
+            &existing,
+            &changes,
+            &[],
+            &[],
+            "calendar-provider",
+            &selected,
+            &HashSet::new(),
+            ExternalImportWindow::new(
+                LocalDate::parse("2026-01-01").unwrap(),
+                LocalDate::parse("2026-01-31").unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(!reconciled[0].source().is_available());
+        assert!(reconciled[1].source().is_available());
+    }
+
+    #[test]
+    fn deselected_calendar_is_retained_but_not_executable() {
+        let input = event("2026-01-05", 30);
+        let existing = plan_for(&input);
+
+        let reconciled = reconcile_external_plans_with_changes(
+            std::slice::from_ref(&existing),
+            &[],
+            &[],
+            &[],
+            "calendar-provider",
+            &HashSet::new(),
+            &HashSet::new(),
+            ExternalImportWindow::new(
+                LocalDate::parse("2026-01-01").unwrap(),
+                LocalDate::parse("2026-01-31").unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].id(), existing.id());
+        assert!(!reconciled[0].is_executable());
     }
 
     #[test]

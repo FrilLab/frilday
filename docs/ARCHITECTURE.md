@@ -112,6 +112,23 @@ The import convention is deterministic and intentionally small:
 - Reconciliation only marks missing Google Plans unavailable inside the
   requested window. Plans outside that window and local Plans are preserved.
 
+Google Calendar sync stores one provider sync cursor per selected calendar in
+the versioned settings record. The first sync reads the complete event
+collection and filters it locally; successful later syncs use the provider's
+incremental `syncToken`. A `410 Gone`/expired cursor discards only that
+calendar's cursor and retries a complete rescan. Missing, cancelled, deleted,
+untagged, invalid, and moved-out-of-window events become unavailable source
+states rather than deleted Plans. A full rescan only reconciles absence for
+the calendar that was fully read, while an incremental response applies only
+the returned upserts/tombstones.
+
+Changing the selected-calendar set marks Plans from deselected calendars
+unavailable and clears their cursors so re-selection performs a fresh import.
+Sync writes Plans and cursor state only after all selected-calendar reads have
+succeeded. Network, auth, or provider errors retain the last successful local
+Plans and cursor, record a last-sync error, and remain retryable through
+`Sync now`.
+
 ### Google Calendar connection boundary
 
 The desktop Google Calendar adapter keeps authentication and provider
@@ -122,7 +139,7 @@ Settings UI
     ↓ typed Tauri command
 Rust Google adapter ── OAuth 2.0 PKCE + loopback callback ── Google
     ├─ OS credential store: access/refresh token
-    └─ SQLite settings_kv: selected calendar ids and cached choices
+    └─ SQLite settings_kv: selected ids, cached choices, sync cursors, and last-sync state
 ```
 
 The adapter requests only Google's focused read-only scopes:

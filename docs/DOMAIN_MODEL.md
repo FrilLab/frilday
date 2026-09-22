@@ -85,6 +85,12 @@ SQLite, PostgreSQL, and serialization libraries.
   for historical review. If the same source identity reappears, reconciliation
   can mark the Plan available again; a Plan with history keeps its FrilDay
   snapshot instead of being overwritten by upstream changes.
+- Calendar reconciliation is incremental when the provider supplies a cursor.
+  A complete read reconciles missing identities only for that calendar and
+  date window; a change feed applies explicit upserts/tombstones only. An
+  expired cursor falls back to a complete read. Deselecting or disconnecting a
+  source marks its Plans unavailable, clears the cursor, and never removes
+  the Plan or its execution history.
 - The desktop Routine management surface edits reusable defaults as one unit:
   title, description, planned duration, recurrence, start date, and finite
   limits. It does not expose completion or timer controls as part of routine
