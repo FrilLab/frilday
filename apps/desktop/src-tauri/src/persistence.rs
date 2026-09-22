@@ -63,6 +63,8 @@ impl Default for PlanSourceRecord {
 pub struct PlanRecord {
     pub id: String,
     pub routine_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
     pub date: String,
     pub baseline_duration_minutes: u32,
     pub duration_override_minutes: Option<u32>,
@@ -176,6 +178,7 @@ struct CompletionRow {
 struct PlanRow {
     id: String,
     routine_id: Option<String>,
+    title: Option<String>,
     date: String,
     baseline_duration_minutes: i64,
     duration_override_minutes: Option<i64>,
@@ -256,6 +259,7 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
         "CREATE TABLE IF NOT EXISTS plans (
             id TEXT PRIMARY KEY,
             routine_id TEXT,
+            title TEXT,
             date TEXT NOT NULL,
             baseline_duration_minutes INTEGER NOT NULL,
             duration_override_minutes INTEGER,
@@ -316,6 +320,7 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             .await
             .map_err(|error| format!("Failed to inspect Plan schema: {error}"))?;
     for (name, definition) in [
+        ("title", "TEXT"),
         ("source_kind", "TEXT NOT NULL DEFAULT 'local'"),
         ("source_provider_id", "TEXT"),
         ("source_calendar_id", "TEXT"),
@@ -494,7 +499,7 @@ pub async fn load_app_data_from_pool(pool: &SqlitePool) -> Result<AppData, Strin
             })
             .collect(),
         plans: sqlx::query_as::<_, PlanRow>(
-            "SELECT id, routine_id, date, baseline_duration_minutes,
+            "SELECT id, routine_id, title, date, baseline_duration_minutes,
                     duration_override_minutes, status, moved_to_ymd,
                     source_kind, source_provider_id, source_calendar_id,
                     source_event_id, source_occurrence_id, source_availability
@@ -568,6 +573,7 @@ fn plan_from_row(row: PlanRow) -> Result<PlanRecord, String> {
     Ok(PlanRecord {
         id: row.id,
         routine_id: row.routine_id,
+        title: row.title,
         date: row.date,
         baseline_duration_minutes: u32::try_from(row.baseline_duration_minutes)
             .map_err(|_| "Plan baseline duration is invalid".to_owned())?,
@@ -767,13 +773,14 @@ async fn insert_plan(
 ) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO plans (
-            id, routine_id, date, baseline_duration_minutes,
+            id, routine_id, title, date, baseline_duration_minutes,
             duration_override_minutes, status, moved_to_ymd,
             source_kind, source_provider_id, source_calendar_id,
             source_event_id, source_occurrence_id, source_availability
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             routine_id = excluded.routine_id,
+            title = excluded.title,
             date = excluded.date,
             baseline_duration_minutes = excluded.baseline_duration_minutes,
             duration_override_minutes = excluded.duration_override_minutes,
@@ -788,6 +795,7 @@ async fn insert_plan(
     )
     .bind(&plan.id)
     .bind(&plan.routine_id)
+    .bind(&plan.title)
     .bind(&plan.date)
     .bind(i64::from(plan.baseline_duration_minutes))
     .bind(plan.duration_override_minutes.map(i64::from))
@@ -811,15 +819,16 @@ async fn insert_plan_if_absent(
 ) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO plans (
-            id, routine_id, date, baseline_duration_minutes,
+            id, routine_id, title, date, baseline_duration_minutes,
             duration_override_minutes, status, moved_to_ymd,
             source_kind, source_provider_id, source_calendar_id,
             source_event_id, source_occurrence_id, source_availability
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT DO NOTHING",
     )
     .bind(&plan.id)
     .bind(&plan.routine_id)
+    .bind(&plan.title)
     .bind(&plan.date)
     .bind(i64::from(plan.baseline_duration_minutes))
     .bind(plan.duration_override_minutes.map(i64::from))
@@ -835,6 +844,23 @@ async fn insert_plan_if_absent(
     .await
     .map(|_| ())
     .map_err(|error| format!("Failed to import plan: {error}"))
+}
+
+pub(crate) async fn save_plan_records(
+    pool: &SqlitePool,
+    plans: &[PlanRecord],
+) -> Result<(), String> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to begin Plan import transaction: {error}"))?;
+    for plan in plans {
+        insert_plan(&mut transaction, plan).await?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Failed to commit Plan import transaction: {error}"))
 }
 
 async fn insert_time_entry(
@@ -1250,6 +1276,7 @@ mod tests {
             plans: vec![PlanRecord {
                 id: "routine-plan:6:task-1:2026-01-05".to_owned(),
                 routine_id: Some("task-1".to_owned()),
+                title: None,
                 date: "2026-01-05".to_owned(),
                 baseline_duration_minutes: 30,
                 duration_override_minutes: None,
@@ -1636,6 +1663,7 @@ mod tests {
             let plan = PlanRecord {
                 id: "external-plan:calendar-provider-event-1".to_owned(),
                 routine_id: None,
+                title: Some("Rust study".to_owned()),
                 date: "2026-01-05".to_owned(),
                 baseline_duration_minutes: 45,
                 duration_override_minutes: None,
@@ -1706,6 +1734,7 @@ mod tests {
                 expected.plans.push(PlanRecord {
                     id: plan_id.clone(),
                     routine_id: Some(routine_id.to_owned()),
+                    title: None,
                     date: date.to_owned(),
                     baseline_duration_minutes: duration,
                     duration_override_minutes: None,

@@ -42,6 +42,7 @@ export interface PlanSource {
 export interface Plan {
   id: string;
   routineId: string | null;
+  title?: string | null;
   date: string;
   baselineDurationMinutes: number;
   durationOverrideMinutes: number | null;

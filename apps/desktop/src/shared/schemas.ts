@@ -149,6 +149,7 @@ const LocalPlanSourceDefault = {
 export const PlanSchema = z.object({
   id: z.string().min(1),
   routineId: z.string().min(1).nullable(),
+  title: z.string().min(1).nullable().optional(),
   date: YmdSchema,
   baselineDurationMinutes: z.number().int().min(1).max(720),
   durationOverrideMinutes: z.number().int().min(1).max(720).nullable(),

@@ -71,12 +71,14 @@ SQLite, PostgreSQL, and serialization libraries.
   it started from. Legacy sessions and completions are backfilled to the
   deterministic Routine/date Plan id on database initialization; their
   original routine/date keys remain intact for compatibility.
-- Plan source is provider-neutral. `Local` identifies a FrilDay-created Plan;
-  `ExternalCalendar` carries provider id, calendar id, event id, and an
-  optional recurring occurrence id. External Plan identity is deterministic
-  and length-prefixed, so the same upstream occurrence reconciles to one Plan
-  even when an id contains separators. Provider auth, API DTOs, HTTP clients,
-  and SDK types remain outside `frilday-core`.
+- Plan source is provider-neutral. Local identifies a FrilDay-created Plan;
+  ExternalCalendar carries provider id, calendar id, event id, and an
+  optional recurring occurrence id. An external Plan also retains the
+  normalized event title because it has no FrilDay Routine title to inherit.
+  External Plan identity is deterministic and length-prefixed, so the same
+  upstream occurrence reconciles to one Plan even when an id contains
+  separators. Provider auth, API DTOs, HTTP clients, and SDK types remain
+  outside frilday-core.
 - An external event that disappears upstream is retained with an unavailable
   source state rather than deleted. It is no longer executable or counted as
   future planned time, but existing Sessions and Completions remain attached
@@ -119,7 +121,7 @@ or the `daily_check.db` filename.
 | legacy `Task.repeatCount` | `Routine.occurrence_limit` (app field: `occurrenceLimit`; user-facing label: lifetime occurrence limit; not a weekly recurrence count) |
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
 | derived scheduled Task/date slot | virtual `Plan`, persisted when overridden/skipped/completed/executed |
-| normalized external calendar event identity | external `Plan` source (`providerId`, `calendarId`, `eventId`, optional occurrence id); provider transport remains adapter-owned |
+| normalized external calendar event title and identity | external `Plan` title plus source (`providerId`, `calendarId`, `eventId`, optional occurrence id); provider transport remains adapter-owned |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
 | `TimeEntry.startedAt`, `endedAt`, `pausedAt`, `activeStartedAt`, `accumulatedMillis` | `Session` lifecycle state |
 | `TimeEntry.minutes` | Recomputed from timestamps; retained only as a compatibility/cache field outside core |
