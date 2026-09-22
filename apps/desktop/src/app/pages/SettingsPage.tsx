@@ -1,10 +1,237 @@
-import { useContext, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import type { Locale } from '../../i18n';
 import { LocaleContext } from '../../i18n/context';
 import {
   MAX_DAILY_CAPACITY_MINUTES,
   MIN_DAILY_CAPACITY_MINUTES,
 } from '../../domain/schedule/weeklyTimeBudget';
+import {
+  connectGoogleCalendar,
+  disconnectGoogleCalendar,
+  getGoogleCalendarState,
+  refreshGoogleCalendars,
+  saveGoogleCalendarSelection,
+  type GoogleCalendarViewState,
+} from '../../infrastructure/tauri/googleCalendar';
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Google Calendar integration failed.';
+}
+
+function GoogleCalendarSettings() {
+  const { t } = useContext(LocaleContext);
+  const [state, setState] = useState<GoogleCalendarViewState | null>(null);
+  const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    void getGoogleCalendarState()
+      .then((nextState) => {
+        if (!current) return;
+        setState(nextState);
+        setSelectedCalendarIds(nextState.selectedCalendarIds);
+      })
+      .catch((nextError: unknown) => {
+        if (current) setError(errorMessage(nextError));
+      });
+
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  const applyState = (nextState: GoogleCalendarViewState) => {
+    setState(nextState);
+    setSelectedCalendarIds(nextState.selectedCalendarIds);
+  };
+
+  const runAction = async (
+    action: string,
+    operation: () => Promise<GoogleCalendarViewState>,
+  ) => {
+    setBusyAction(action);
+    setError(null);
+    setNotice(null);
+    try {
+      applyState(await operation());
+      if (action === 'save') setNotice(t('settings.googleCalendar.saved'));
+    } catch (actionError: unknown) {
+      setError(errorMessage(actionError));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const toggleCalendar = (calendarId: string) => {
+    setSelectedCalendarIds((current) =>
+      current.includes(calendarId)
+        ? current.filter((id) => id !== calendarId)
+        : [...current, calendarId],
+    );
+    setNotice(null);
+    setError(null);
+  };
+
+  const saveSelection = () => {
+    if (selectedCalendarIds.length === 0) {
+      setError(t('settings.googleCalendar.selectAtLeastOne'));
+      return;
+    }
+    void runAction('save', () =>
+      saveGoogleCalendarSelection(selectedCalendarIds),
+    );
+  };
+
+  return (
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-zinc-100">
+            {t('settings.googleCalendar.title')}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm text-zinc-400">
+            {t('settings.googleCalendar.desc')}
+          </p>
+        </div>
+
+        {state && !state.connected && (
+          <button
+            type="button"
+            disabled={busyAction !== null || !state.clientConfigured}
+            onClick={() => void runAction('connect', connectGoogleCalendar)}
+            className="h-10 rounded-xl border border-sky-300/30 bg-sky-300/10 px-3 text-sm text-sky-100 hover:bg-sky-300/20 disabled:cursor-not-allowed disabled:opacity-50">
+            {state.reauthorizationRequired
+              ? t('settings.googleCalendar.reconnect')
+              : t('settings.googleCalendar.connect')}
+          </button>
+        )}
+      </div>
+
+      {!state && !error && (
+        <p className="mt-4 text-sm text-zinc-500">
+          {t('settings.googleCalendar.loading')}
+        </p>
+      )}
+
+      {state && (
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs ${
+                state.connected
+                  ? 'bg-emerald-300/10 text-emerald-200'
+                  : state.reauthorizationRequired
+                    ? 'bg-amber-300/10 text-amber-200'
+                    : 'bg-zinc-800 text-zinc-400'
+              }`}>
+              {state.connected
+                ? t('settings.googleCalendar.connected')
+                : state.reauthorizationRequired
+                  ? t('settings.googleCalendar.reauthorizationRequired')
+                  : t('settings.googleCalendar.disconnected')}
+            </span>
+            <span className="text-xs text-zinc-500">
+              {t('settings.googleCalendar.scope')}
+            </span>
+          </div>
+
+          {!state.clientConfigured && (
+            <p className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-sm text-amber-100">
+              {t('settings.googleCalendar.clientSetup')}
+            </p>
+          )}
+
+          {(state.connected || state.reauthorizationRequired) && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busyAction !== null || !state.connected}
+                onClick={() =>
+                  void runAction('refresh', refreshGoogleCalendars)
+                }
+                className="h-9 rounded-xl border border-zinc-700 px-3 text-sm text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50">
+                {t('settings.googleCalendar.refresh')}
+              </button>
+              <button
+                type="button"
+                disabled={busyAction !== null}
+                onClick={() =>
+                  void runAction('disconnect', disconnectGoogleCalendar)
+                }
+                className="h-9 rounded-xl border border-rose-300/20 px-3 text-sm text-rose-200 hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-50">
+                {t('settings.googleCalendar.disconnect')}
+              </button>
+            </div>
+          )}
+
+          {state.connected && state.calendars.length > 0 && (
+            <div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium text-zinc-200">
+                  {t('settings.googleCalendar.calendars')}
+                </p>
+                <button
+                  type="button"
+                  disabled={busyAction !== null}
+                  onClick={saveSelection}
+                  className="h-9 rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-3 text-sm text-emerald-100 hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-50">
+                  {t('common.save')}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {state.calendars.map((calendar) => (
+                  <label
+                    key={calendar.id}
+                    className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-950/30 p-3 hover:border-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={selectedCalendarIds.includes(calendar.id)}
+                      onChange={() => toggleCalendar(calendar.id)}
+                      className="mt-0.5 accent-sky-400"
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-zinc-100">
+                        {calendar.summary}
+                        {calendar.primary && (
+                          <span className="ml-2 text-xs text-zinc-500">
+                            {t('settings.googleCalendar.primary')}
+                          </span>
+                        )}
+                      </span>
+                      {calendar.description && (
+                        <span className="mt-1 block truncate text-xs text-zinc-500">
+                          {calendar.description}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {state.connected && state.calendars.length === 0 && (
+            <p className="text-sm text-zinc-500">
+              {t('settings.googleCalendar.noCalendars')}
+            </p>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className="mt-3 text-sm text-rose-300" role="alert">
+          {error}
+        </p>
+      )}
+      {notice && <p className="mt-3 text-sm text-emerald-300">{notice}</p>}
+    </section>
+  );
+}
 
 export function SettingsPage(props: {
   dailyCapacityMinutes: number;
@@ -108,6 +335,8 @@ export function SettingsPage(props: {
           </p>
         )}
       </section>
+
+      <GoogleCalendarSettings />
 
     </div>
   );

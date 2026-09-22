@@ -74,6 +74,18 @@ bun run build
 bunx tauri build
 ```
 
+Google Calendar connection is optional. To enable the desktop OAuth flow,
+provide a Google OAuth desktop-client id without committing it:
+
+```bash
+FRILDAY_GOOGLE_CLIENT_ID=your-desktop-client-id bunx tauri dev
+```
+
+The same environment variable must be present when packaging a build. The
+integration requests read-only calendar access, stores tokens in the operating
+system credential store, and stores only selected calendar configuration in
+SQLite.
+
 The macOS bundle is generated at:
 
 ```text

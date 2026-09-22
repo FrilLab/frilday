@@ -1,6 +1,7 @@
 mod bootstrap;
 mod core_commands;
 pub mod external_calendar;
+mod google_calendar;
 mod migration;
 mod persistence;
 mod plugins;
@@ -11,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             persistence::initialize_app_database,
             persistence::load_app_data,
@@ -38,7 +40,12 @@ pub fn run() {
             core_commands::core_stop_timer,
             core_commands::core_pause_timer,
             core_commands::core_resume_timer,
-            core_commands::core_target_reached
+            core_commands::core_target_reached,
+            google_calendar::google_calendar_get_state,
+            google_calendar::google_calendar_begin_auth,
+            google_calendar::google_calendar_refresh_calendars,
+            google_calendar::google_calendar_set_selection,
+            google_calendar::google_calendar_disconnect
         ])
         .setup(bootstrap::setup)
         .run(tauri::generate_context!())
