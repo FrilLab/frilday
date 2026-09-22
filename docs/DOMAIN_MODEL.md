@@ -10,11 +10,14 @@ SQLite, PostgreSQL, and serialization libraries.
   owns the title, description, planned duration, recurring schedule, start
   constraint, archive state, and optional completion/occurrence limits. It is
   not an execution record.
-- **Plan** is a date-specific intention. It refers to a Routine, copies the
-  routine's planned duration as its baseline, and can have a date-specific
-  duration override. A Plan can be skipped or moved without changing the
-  Routine. Routine-derived Plans are virtual until an override, skip, or
-  execution makes the date-specific decision durable.
+- **Plan** is a date-specific intention. It may be a local FrilDay Plan
+  derived from a Routine or an external-calendar Plan identified by a
+  provider-neutral source identity. Local Plans copy the Routine's planned
+  duration as their baseline; external Plans carry normalized event date and
+  planned duration. Both kinds can have a date-specific duration override, be
+  skipped or moved, and remain associated with Sessions and Completions.
+  Routine-derived Plans are virtual until an override, skip, or execution
+  makes the date-specific decision durable.
 - **Session** is an actual-work lifecycle. It stores a stable id, its
   associations, the local tracking date, the first start/end timestamps, the
   current active-segment start or pause timestamp, and accumulated active
@@ -68,6 +71,18 @@ SQLite, PostgreSQL, and serialization libraries.
   it started from. Legacy sessions and completions are backfilled to the
   deterministic Routine/date Plan id on database initialization; their
   original routine/date keys remain intact for compatibility.
+- Plan source is provider-neutral. `Local` identifies a FrilDay-created Plan;
+  `ExternalCalendar` carries provider id, calendar id, event id, and an
+  optional recurring occurrence id. External Plan identity is deterministic
+  and length-prefixed, so the same upstream occurrence reconciles to one Plan
+  even when an id contains separators. Provider auth, API DTOs, HTTP clients,
+  and SDK types remain outside `frilday-core`.
+- An external event that disappears upstream is retained with an unavailable
+  source state rather than deleted. It is no longer executable or counted as
+  future planned time, but existing Sessions and Completions remain attached
+  for historical review. If the same source identity reappears, reconciliation
+  can mark the Plan available again; a Plan with history keeps its FrilDay
+  snapshot instead of being overwritten by upstream changes.
 - The desktop Routine management surface edits reusable defaults as one unit:
   title, description, planned duration, recurrence, start date, and finite
   limits. It does not expose completion or timer controls as part of routine
@@ -104,6 +119,7 @@ or the `daily_check.db` filename.
 | legacy `Task.repeatCount` | `Routine.occurrence_limit` (app field: `occurrenceLimit`; user-facing label: lifetime occurrence limit; not a weekly recurrence count) |
 | `Task.isActive`, `createdAt` | `Routine` archive state and creation timestamp |
 | derived scheduled Task/date slot | virtual `Plan`, persisted when overridden/skipped/completed/executed |
+| normalized external calendar event identity | external `Plan` source (`providerId`, `calendarId`, `eventId`, optional occurrence id); provider transport remains adapter-owned |
 | `TimeEntry.id`, `taskId`, `date` | `SessionId`, `RoutineId`, local tracking date |
 | `TimeEntry.startedAt`, `endedAt`, `pausedAt`, `activeStartedAt`, `accumulatedMillis` | `Session` lifecycle state |
 | `TimeEntry.minutes` | Recomputed from timestamps; retained only as a compatibility/cache field outside core |

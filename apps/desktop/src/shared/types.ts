@@ -28,6 +28,15 @@ export type Routine = TaskBase;
 
 export type PlanStatus = 'planned' | 'skipped' | 'moved';
 
+export interface PlanSource {
+  kind: 'local' | 'externalCalendar';
+  providerId: string | null;
+  calendarId: string | null;
+  eventId: string | null;
+  occurrenceId: string | null;
+  availability: 'present' | 'unavailable';
+}
+
 // A persisted record is only created for an explicit date decision, completion,
 // or execution. Routine-derived plans may remain virtual in the UI.
 export interface Plan {
@@ -38,6 +47,9 @@ export interface Plan {
   durationOverrideMinutes: number | null;
   status: PlanStatus;
   movedToYmd: string | null;
+  // Optional keeps older in-memory records valid; persistence normalizes it
+  // to a local source when the field is absent.
+  source?: PlanSource;
 }
 
 // (role: completion record, type: interface)

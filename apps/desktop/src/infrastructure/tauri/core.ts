@@ -1,7 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from './runtime';
 import { toYmd } from '../../shared/utils/date';
-import type { Completion, Plan, Task, TimeEntry } from '../../shared/types';
+import type {
+  Completion,
+  Plan,
+  PlanSource,
+  Task,
+  TimeEntry,
+} from '../../shared/types';
 
 type CoreTaskInput = {
   id: string;
@@ -47,6 +53,7 @@ type CorePlanInput = {
   durationOverrideMinutes: number | null;
   status: Plan['status'];
   movedToYmd: string | null;
+  source: PlanSource;
 };
 
 export type CorePlan = CorePlanInput & {
@@ -205,6 +212,18 @@ function toCorePlan(plan: Plan): CorePlanInput {
     durationOverrideMinutes: plan.durationOverrideMinutes,
     status: plan.status,
     movedToYmd: plan.movedToYmd,
+    source: plan.source ?? localPlanSource(),
+  };
+}
+
+function localPlanSource(): PlanSource {
+  return {
+    kind: 'local',
+    providerId: null,
+    calendarId: null,
+    eventId: null,
+    occurrenceId: null,
+    availability: 'present',
   };
 }
 

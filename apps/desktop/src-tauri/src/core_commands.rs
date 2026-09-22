@@ -6,9 +6,10 @@ use frilday_core::{
     completion_stats_for_week_with_plans, eligible_dates_between, pause_session_for_routine,
     resume_session_for_routine, review_for_range, running_routine_id, start_session,
     stop_session_for_routine, target_reached_sessions_at_with_plans,
-    toggle_routine_completion_for_plan, Completion, LocalDate, Plan, PlanId, PlanStatus,
-    PlannedDuration, ReviewDay, ReviewPeriod, ReviewTotals, Routine, RoutineCategory, RoutineId,
-    RoutinePlanTarget, RoutineStatsTarget, ScheduleRule, Session, SessionId, Timestamp,
+    toggle_routine_completion_for_plan, Completion, ExternalPlanAvailability, ExternalPlanIdentity,
+    LocalDate, Plan, PlanId, PlanSource, PlanStatus, PlannedDuration, ReviewDay, ReviewPeriod,
+    ReviewTotals, Routine, RoutineCategory, RoutineId, RoutinePlanTarget, RoutineStatsTarget,
+    ScheduleRule, Session, SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +56,24 @@ pub struct PlanInput {
     duration_override_minutes: Option<u32>,
     status: String,
     moved_to_ymd: Option<String>,
+    #[serde(default)]
+    source: Option<PlanSourceInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanSourceInput {
+    kind: String,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    calendar_id: Option<String>,
+    #[serde(default)]
+    event_id: Option<String>,
+    #[serde(default)]
+    occurrence_id: Option<String>,
+    #[serde(default = "default_source_availability")]
+    availability: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +89,18 @@ pub struct PlanOutput {
     moved_to_ymd: Option<String>,
     effective_date: String,
     executable: bool,
+    source: PlanSourceOutput,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanSourceOutput {
+    kind: String,
+    provider_id: Option<String>,
+    calendar_id: Option<String>,
+    event_id: Option<String>,
+    occurrence_id: Option<String>,
+    availability: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -937,6 +968,71 @@ fn completion_to_output(completion: &Completion) -> Option<CompletionOutput> {
     })
 }
 
+fn default_source_availability() -> String {
+    "present".to_owned()
+}
+
+fn plan_source_from_input(input: Option<&PlanSourceInput>) -> Result<PlanSource, String> {
+    let Some(input) = input else {
+        return Ok(PlanSource::Local);
+    };
+
+    match input.kind.as_str() {
+        "local" => Ok(PlanSource::Local),
+        "externalCalendar" => {
+            let identity = ExternalPlanIdentity::new(
+                input
+                    .provider_id
+                    .clone()
+                    .ok_or_else(|| "external plan source requires a provider id".to_owned())?,
+                input
+                    .calendar_id
+                    .clone()
+                    .ok_or_else(|| "external plan source requires a calendar id".to_owned())?,
+                input
+                    .event_id
+                    .clone()
+                    .ok_or_else(|| "external plan source requires an event id".to_owned())?,
+                input.occurrence_id.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+            match input.availability.as_str() {
+                "present" => Ok(PlanSource::external(identity)),
+                "unavailable" => Ok(PlanSource::external_unavailable(identity)),
+                other => Err(format!("unknown external plan availability: {other}")),
+            }
+        }
+        other => Err(format!("unknown plan source kind: {other}")),
+    }
+}
+
+fn plan_source_to_output(source: &PlanSource) -> PlanSourceOutput {
+    match source {
+        PlanSource::Local => PlanSourceOutput {
+            kind: "local".to_owned(),
+            provider_id: None,
+            calendar_id: None,
+            event_id: None,
+            occurrence_id: None,
+            availability: "present".to_owned(),
+        },
+        PlanSource::ExternalCalendar {
+            identity,
+            availability,
+        } => PlanSourceOutput {
+            kind: "externalCalendar".to_owned(),
+            provider_id: Some(identity.provider_id().to_owned()),
+            calendar_id: Some(identity.calendar_id().to_owned()),
+            event_id: Some(identity.event_id().to_owned()),
+            occurrence_id: identity.occurrence_id().map(str::to_owned),
+            availability: match availability {
+                ExternalPlanAvailability::Present => "present".to_owned(),
+                ExternalPlanAvailability::Unavailable => "unavailable".to_owned(),
+            },
+        },
+    }
+}
+
 fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
     let baseline_duration = PlannedDuration::from_minutes(input.baseline_duration_minutes)
         .ok_or_else(|| "plan baseline duration must be positive".to_owned())?;
@@ -958,7 +1054,7 @@ fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
         )?),
         other => return Err(format!("unknown plan status: {other}")),
     };
-    Plan::from_persisted(
+    Plan::from_persisted_with_source(
         PlanId::new(input.id.clone()).map_err(|error| error.to_string())?,
         input
             .routine_id
@@ -970,6 +1066,7 @@ fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
         baseline_duration,
         duration_override,
         status,
+        plan_source_from_input(input.source.as_ref())?,
     )
     .map_err(|error| error.to_string())
 }
@@ -991,6 +1088,7 @@ fn plan_to_output(plan: &Plan) -> PlanOutput {
         effective_date: plan.effective_date().to_string(),
         moved_to_ymd,
         executable: plan.is_executable(),
+        source: plan_source_to_output(plan.source()),
     }
 }
 

@@ -6,6 +6,7 @@ use crate::{
     ids::{PlanId, RoutineId},
     routine::Routine,
     session::Session,
+    source::{ExternalPlanAvailability, ExternalPlanIdentity, PlanSource},
     time::PlannedDuration,
 };
 
@@ -13,6 +14,7 @@ use crate::{
 pub enum PlanError {
     MissingRoutine,
     InvalidDuration,
+    InvalidExternalPlanId,
 }
 
 impl fmt::Display for PlanError {
@@ -20,6 +22,9 @@ impl fmt::Display for PlanError {
         formatter.write_str(match self {
             Self::MissingRoutine => "a persisted plan must identify its routine",
             Self::InvalidDuration => "a persisted plan duration must be positive",
+            Self::InvalidExternalPlanId => {
+                "an external plan id must be derived from its source identity"
+            }
         })
     }
 }
@@ -43,6 +48,7 @@ pub struct Plan {
     planned_duration: PlannedDuration,
     duration_override: Option<PlannedDuration>,
     status: PlanStatus,
+    source: PlanSource,
 }
 
 impl Plan {
@@ -59,6 +65,29 @@ impl Plan {
             planned_duration,
             duration_override: None,
             status: PlanStatus::Planned,
+            source: PlanSource::Local,
+        }
+    }
+
+    /// Build a Plan imported from a normalized external calendar event.
+    ///
+    /// The Plan id is deterministic from the complete source identity, so a
+    /// later reconciliation of the same event updates the existing Plan
+    /// instead of creating a duplicate. Provider API/auth details stay in the
+    /// adapter that produced the identity.
+    pub fn from_external(
+        identity: ExternalPlanIdentity,
+        date: LocalDate,
+        planned_duration: PlannedDuration,
+    ) -> Self {
+        Self {
+            id: Self::id_for_external_source(&identity),
+            routine_id: None,
+            date,
+            planned_duration,
+            duration_override: None,
+            status: PlanStatus::Planned,
+            source: PlanSource::external(identity),
         }
     }
 
@@ -75,6 +104,12 @@ impl Plan {
             date
         ))
         .expect("the deterministic plan id is never empty")
+    }
+
+    /// Build the stable identity used by an external calendar Plan.
+    pub fn id_for_external_source(identity: &ExternalPlanIdentity) -> PlanId {
+        PlanId::new(format!("external-plan:{}", identity.stable_key()))
+            .expect("an external source identity is never empty")
     }
 
     /// Materialize a Routine-derived Plan when the date is currently
@@ -105,11 +140,42 @@ impl Plan {
         duration_override: Option<PlannedDuration>,
         status: PlanStatus,
     ) -> Result<Self, PlanError> {
-        if routine_id.is_none() {
+        Self::from_persisted_with_source(
+            id,
+            routine_id,
+            date,
+            baseline_duration,
+            duration_override,
+            status,
+            PlanSource::Local,
+        )
+    }
+
+    /// Rehydrate a local or external Plan stored by an adapter.
+    ///
+    /// Local persisted Plans retain the historical requirement that they
+    /// identify a Routine. External calendar Plans may stand alone, because
+    /// their source identity is their stable association and they can still
+    /// be linked directly by Session and Completion records.
+    pub fn from_persisted_with_source(
+        id: PlanId,
+        routine_id: Option<RoutineId>,
+        date: LocalDate,
+        baseline_duration: PlannedDuration,
+        duration_override: Option<PlannedDuration>,
+        status: PlanStatus,
+        source: PlanSource,
+    ) -> Result<Self, PlanError> {
+        if source.is_local() && routine_id.is_none() {
             return Err(PlanError::MissingRoutine);
         }
         if duration_override.is_some_and(|duration| duration.minutes() == 0) {
             return Err(PlanError::InvalidDuration);
+        }
+        if let Some(identity) = source.external_identity()
+            && id != Self::id_for_external_source(identity)
+        {
+            return Err(PlanError::InvalidExternalPlanId);
         }
         Ok(Self {
             id,
@@ -118,6 +184,7 @@ impl Plan {
             planned_duration: baseline_duration,
             duration_override,
             status,
+            source,
         })
     }
 
@@ -152,6 +219,18 @@ impl Plan {
         self.status
     }
 
+    pub fn source(&self) -> &PlanSource {
+        &self.source
+    }
+
+    pub fn external_identity(&self) -> Option<&ExternalPlanIdentity> {
+        self.source.external_identity()
+    }
+
+    pub const fn external_availability(&self) -> Option<ExternalPlanAvailability> {
+        self.source.external_availability()
+    }
+
     pub const fn effective_date(&self) -> LocalDate {
         match self.status {
             PlanStatus::MovedTo(date) => date,
@@ -160,7 +239,7 @@ impl Plan {
     }
 
     pub const fn is_executable(&self) -> bool {
-        !matches!(self.status, PlanStatus::Skipped)
+        self.source.is_available() && !matches!(self.status, PlanStatus::Skipped)
     }
 
     /// A Plan with actual-work or completion history is an immutable
@@ -186,6 +265,28 @@ impl Plan {
 
     pub fn clear_duration_override(&mut self) {
         self.duration_override = None;
+    }
+
+    /// Update the imported snapshot after an external event changed, while
+    /// retaining any FrilDay-specific duration override or move decision.
+    /// Adapters must call this only when the Plan has no execution history.
+    pub fn refresh_external_snapshot(
+        &mut self,
+        date: LocalDate,
+        baseline_duration: PlannedDuration,
+    ) {
+        if self.source.is_external() {
+            self.date = date;
+            self.planned_duration = baseline_duration;
+        }
+    }
+
+    pub fn mark_source_available(&mut self) {
+        self.source.mark_available();
+    }
+
+    pub fn mark_source_unavailable(&mut self) {
+        self.source.mark_unavailable();
     }
 
     pub fn skip(&mut self) {
