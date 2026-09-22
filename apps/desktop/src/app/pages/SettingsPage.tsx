@@ -9,10 +9,12 @@ import {
   connectGoogleCalendar,
   disconnectGoogleCalendar,
   getGoogleCalendarState,
+  importGoogleCalendarEvents,
   refreshGoogleCalendars,
   saveGoogleCalendarSelection,
   type GoogleCalendarViewState,
 } from '../../infrastructure/tauri/googleCalendar';
+import { toYmd } from '../../shared/utils/date';
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -87,6 +89,36 @@ function GoogleCalendarSettings() {
     );
   };
 
+  const syncNow = async () => {
+    if (!state?.connected || selectedCalendarIds.length === 0) return;
+    setBusyAction('sync');
+    setError(null);
+    setNotice(null);
+    try {
+      const end = new Date();
+      const start = new Date(end);
+      start.setDate(start.getDate() - 90);
+      end.setDate(end.getDate() + 365);
+      const result = await importGoogleCalendarEvents(toYmd(start), toYmd(end));
+      applyState(await getGoogleCalendarState());
+      setNotice(
+        t('settings.googleCalendar.syncComplete', {
+          imported: result.importedEventCount,
+          removed: result.removedEventCount,
+        }),
+      );
+    } catch (syncError: unknown) {
+      setError(errorMessage(syncError));
+      try {
+        applyState(await getGoogleCalendarState());
+      } catch {
+        // Preserve the actionable sync error when the state refresh also fails.
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -159,6 +191,17 @@ function GoogleCalendarSettings() {
               </button>
               <button
                 type="button"
+                disabled={
+                  busyAction !== null ||
+                  !state.connected ||
+                  selectedCalendarIds.length === 0
+                }
+                onClick={() => void syncNow()}
+                className="h-9 rounded-xl border border-sky-300/30 bg-sky-300/10 px-3 text-sm text-sky-100 hover:bg-sky-300/20 disabled:cursor-not-allowed disabled:opacity-50">
+                {t('settings.googleCalendar.syncNow')}
+              </button>
+              <button
+                type="button"
                 disabled={busyAction !== null}
                 onClick={() =>
                   void runAction('disconnect', disconnectGoogleCalendar)
@@ -219,6 +262,22 @@ function GoogleCalendarSettings() {
             <p className="text-sm text-zinc-500">
               {t('settings.googleCalendar.noCalendars')}
             </p>
+          )}
+
+          {(state.lastSyncAt || state.lastSyncError) && (
+            <div className="space-y-1 text-xs">
+              {state.lastSyncAt && (
+                <p className="text-zinc-500">
+                  {t('settings.googleCalendar.lastSync')}{' '}
+                  {new Date(state.lastSyncAt).toLocaleString()}
+                </p>
+              )}
+              {state.lastSyncError && (
+                <p className="text-amber-200">
+                  {t('settings.googleCalendar.lastSyncError')}: {state.lastSyncError}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
