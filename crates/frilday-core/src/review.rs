@@ -1,6 +1,6 @@
 use crate::{
     Completion, LocalDate, Plan, RoutineId, RoutinePlanTarget, Session, Timestamp,
-    planning::resolve_plans,
+    planning::{resolve_external_plans, resolve_plans},
 };
 
 /// The transparent planned-versus-actual metrics used by Review.
@@ -219,6 +219,7 @@ pub fn review_for_range(
             totals: ReviewTotals::default(),
         })
         .collect::<Vec<_>>();
+    let external_plans = resolve_external_plans(persisted_plans, start, end);
     let mut days = dates
         .iter()
         .copied()
@@ -252,6 +253,16 @@ pub fn review_for_range(
         }
     }
 
+    for plan in &external_plans {
+        if !plan.is_executable() {
+            continue;
+        }
+        let completed = completion_matches_plan(completions, plan);
+        let day_index = date_index(&dates, plan.effective_date())
+            .expect("an in-range external Plan must have an in-range effective date");
+        days[day_index].totals.add_plan(plan, completed);
+    }
+
     for session in sessions
         .iter()
         .filter(|session| date_in_range(session.date(), start, end))
@@ -273,12 +284,16 @@ pub fn review_for_range(
                         .position(|state| state.plans.iter().any(|plan| plan.id() == plan_id))
                 })
             });
-        let assigned = states.iter().any(|state| {
+        let assigned_to_routine_plan = states.iter().any(|state| {
             state
                 .plans
                 .iter()
                 .any(|plan| plan.is_executable() && plan_matches_session(plan, session))
         });
+        let assigned_to_external_plan = external_plans
+            .iter()
+            .any(|plan| plan.is_executable() && plan_matches_session(plan, session));
+        let assigned = assigned_to_routine_plan || assigned_to_external_plan;
 
         days[day_index].totals.add_actual(actual_minutes, !assigned);
         if let Some(routine_index) = routine_index {

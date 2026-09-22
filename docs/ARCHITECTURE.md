@@ -63,6 +63,25 @@ The stable Routine/Plan/Session/Completion vocabulary and the compatibility
 mapping for the current desktop records are defined in
 [DOMAIN_MODEL.md](DOMAIN_MODEL.md).
 
+External calendar integration follows a narrow provider boundary:
+
+```text
+provider API DTO + auth
+          ↓
+calendar adapter: NormalizedExternalEvent
+          ↓
+desktop application: Plan reconciliation
+          ↓
+frilday-core: PlanSource / identity / history invariants
+```
+
+The normalized event contains only opaque provider, calendar, event, and
+optional recurring-occurrence identifiers plus the date and planned duration.
+The core has no Google, OAuth, HTTP, or SDK dependency. Reconciliation uses a
+deterministic source identity to avoid duplicates and retains an unavailable
+Plan when an upstream event disappears so Sessions and Completions remain
+reviewable.
+
 ### Future server delivery
 
 ```text

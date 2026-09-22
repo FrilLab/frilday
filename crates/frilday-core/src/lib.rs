@@ -13,6 +13,7 @@ pub mod review;
 pub mod routine;
 pub mod schedule;
 pub mod session;
+pub mod source;
 pub mod stats;
 pub mod time;
 pub mod timer;
@@ -24,7 +25,10 @@ pub use completion::{
 pub use date::{DateError, LocalDate, Weekday};
 pub use ids::{IdError, PlanId, RoutineId, SessionId};
 pub use plan::{Plan, PlanError, PlanStatus};
-pub use planning::{RoutinePlanTarget, has_virtual_plan_on_date, resolve_plan, resolve_plans};
+pub use planning::{
+    RoutinePlanTarget, has_virtual_plan_on_date, resolve_external_plans, resolve_plan,
+    resolve_plans,
+};
 pub use review::{
     ReviewDay, ReviewPeriod, ReviewTotals, RoutineReview, review_for_date, review_for_range,
     review_for_week,
@@ -39,6 +43,7 @@ pub use session::{
     resume_session_for_routine, running_routine_id, running_session, start_session,
     stop_session_for_routine, validate_no_concurrent_sessions,
 };
+pub use source::{ExternalPlanAvailability, ExternalPlanIdentity, PlanSource, PlanSourceError};
 pub use stats::{
     CompletionTotals, DailyTotals, RoutineCategory, RoutineStatsTarget, TimeTotals,
     WeeklyCompletionStats, WeeklyTotals, actual_minutes_for_routine, aggregate_for_date,
@@ -728,5 +733,87 @@ mod tests {
         let weekly = completion_stats_for_week_with_plans(&targets, &[skipped], &[], monday);
         assert_eq!(weekly.total().scheduled_count(), 1);
         assert_eq!(weekly.total().completed_count(), 0);
+    }
+
+    #[test]
+    fn external_plan_identity_is_stable_and_supports_direct_history() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let identity = ExternalPlanIdentity::new(
+            "calendar-provider",
+            "calendar-1",
+            "event-1",
+            Some("2026-01-05T09:00:00Z"),
+        )
+        .unwrap();
+        let plan = Plan::from_external(
+            identity.clone(),
+            date,
+            PlannedDuration::from_minutes(30).unwrap(),
+        );
+        let same_plan =
+            Plan::from_external(identity, date, PlannedDuration::from_minutes(30).unwrap());
+        assert_eq!(plan.id(), same_plan.id());
+        assert!(plan.source().is_external());
+        assert_eq!(plan.external_identity(), same_plan.external_identity());
+
+        let completion = Completion::for_plan(plan.id().clone(), date);
+        let session = Session::new(
+            SessionId::new("external-session").unwrap(),
+            None,
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+            Some(Timestamp::from_unix_seconds(1_767_601_800)),
+        )
+        .unwrap();
+        let review = review_for_date(
+            &[],
+            std::slice::from_ref(&plan),
+            std::slice::from_ref(&completion),
+            std::slice::from_ref(&session),
+            date,
+            Timestamp::from_unix_seconds(1_767_601_800),
+        );
+        assert_eq!(review.totals().planned_minutes(), 30);
+        assert_eq!(review.totals().actual_minutes(), 30);
+        assert_eq!(review.totals().completed_occurrences(), 1);
+        assert_eq!(review.totals().unplanned_actual_minutes(), 0);
+    }
+
+    #[test]
+    fn unavailable_external_plan_preserves_actual_history_without_future_plan_time() {
+        let date = LocalDate::parse("2026-01-05").unwrap();
+        let identity =
+            ExternalPlanIdentity::new("calendar-provider", "calendar-1", "event-1", None::<String>)
+                .unwrap();
+        let mut plan =
+            Plan::from_external(identity, date, PlannedDuration::from_minutes(30).unwrap());
+        let session = Session::new(
+            SessionId::new("external-session-history").unwrap(),
+            None,
+            Some(plan.id().clone()),
+            date,
+            Timestamp::from_unix_seconds(1_767_600_000),
+            Some(Timestamp::from_unix_seconds(1_767_601_800)),
+        )
+        .unwrap();
+        plan.mark_source_unavailable();
+
+        assert!(!plan.is_executable());
+        assert_eq!(
+            plan.external_availability(),
+            Some(ExternalPlanAvailability::Unavailable)
+        );
+        let review = review_for_date(
+            &[],
+            std::slice::from_ref(&plan),
+            &[],
+            std::slice::from_ref(&session),
+            date,
+            Timestamp::from_unix_seconds(1_767_601_800),
+        );
+        assert_eq!(review.totals().planned_minutes(), 0);
+        assert_eq!(review.totals().actual_minutes(), 30);
+        assert_eq!(review.totals().unplanned_actual_minutes(), 30);
     }
 }

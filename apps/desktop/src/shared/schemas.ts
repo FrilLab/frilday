@@ -94,6 +94,58 @@ export const PlanStatusSchema = z.union([
   z.literal('moved'),
 ]);
 
+const PlanSourceKindSchema = z.union([
+  z.literal('local'),
+  z.literal('externalCalendar'),
+]);
+
+export const PlanSourceSchema = z
+  .object({
+    kind: PlanSourceKindSchema,
+    providerId: z.string().min(1).nullable(),
+    calendarId: z.string().min(1).nullable(),
+    eventId: z.string().min(1).nullable(),
+    occurrenceId: z.string().min(1).nullable(),
+    availability: z.union([z.literal('present'), z.literal('unavailable')]),
+  })
+  .superRefine((source, context) => {
+    if (source.kind === 'local') {
+      if (
+        source.providerId !== null ||
+        source.calendarId !== null ||
+        source.eventId !== null ||
+        source.occurrenceId !== null ||
+        source.availability !== 'present'
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Local Plan sources cannot contain external identity data.',
+        });
+      }
+      return;
+    }
+
+    if (
+      source.providerId === null ||
+      source.calendarId === null ||
+      source.eventId === null
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'External Plan sources require provider, calendar, and event ids.',
+      });
+    }
+  });
+
+const LocalPlanSourceDefault = {
+  kind: 'local' as const,
+  providerId: null,
+  calendarId: null,
+  eventId: null,
+  occurrenceId: null,
+  availability: 'present' as const,
+};
+
 export const PlanSchema = z.object({
   id: z.string().min(1),
   routineId: z.string().min(1).nullable(),
@@ -102,6 +154,7 @@ export const PlanSchema = z.object({
   durationOverrideMinutes: z.number().int().min(1).max(720).nullable(),
   status: PlanStatusSchema,
   movedToYmd: YmdSchema.nullable(),
+  source: PlanSourceSchema.optional().default(LocalPlanSourceDefault),
 });
 
 export const PlansSchema = z.array(PlanSchema);

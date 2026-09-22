@@ -147,6 +147,30 @@ pub fn resolve_plans(
     by_effective_date.into_values().collect()
 }
 
+/// Resolve standalone external calendar Plans in an inclusive range.
+///
+/// External Plans do not need a Routine to retain their source identity, so
+/// they are intentionally projected separately from the Routine schedule
+/// projection above. This keeps existing Routine consumers from treating a
+/// calendar event as a recurring local task while allowing review/application
+/// code to include both Plan kinds explicitly.
+pub fn resolve_external_plans(persisted: &[Plan], start: LocalDate, end: LocalDate) -> Vec<Plan> {
+    if end < start {
+        return Vec::new();
+    }
+
+    persisted
+        .iter()
+        .filter(|plan| {
+            plan.routine_id().is_none()
+                && plan.source().is_external()
+                && plan.effective_date() >= start
+                && plan.effective_date() <= end
+        })
+        .cloned()
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct PlanKey(crate::RoutineId, LocalDate);
 

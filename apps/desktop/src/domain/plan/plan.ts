@@ -1,4 +1,13 @@
-import type { Plan, PlanStatus } from '../../shared/types';
+import type { Plan, PlanSource, PlanStatus } from '../../shared/types';
+
+export const localPlanSource: PlanSource = {
+  kind: 'local',
+  providerId: null,
+  calendarId: null,
+  eventId: null,
+  occurrenceId: null,
+  availability: 'present',
+};
 
 /** Keep this byte-based prefix in lockstep with frilday-core's Plan id rule. */
 export function routinePlanId(routineId: string, date: string): string {
@@ -22,5 +31,6 @@ export function createRoutinePlan(input: {
     durationOverrideMinutes: input.durationOverrideMinutes ?? null,
     status: input.status ?? 'planned',
     movedToYmd: input.movedToYmd ?? null,
+    source: localPlanSource,
   };
 }

@@ -36,6 +36,30 @@ pub struct CompletionRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct PlanSourceRecord {
+    pub kind: String,
+    pub provider_id: Option<String>,
+    pub calendar_id: Option<String>,
+    pub event_id: Option<String>,
+    pub occurrence_id: Option<String>,
+    pub availability: String,
+}
+
+impl Default for PlanSourceRecord {
+    fn default() -> Self {
+        Self {
+            kind: "local".to_owned(),
+            provider_id: None,
+            calendar_id: None,
+            event_id: None,
+            occurrence_id: None,
+            availability: "present".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanRecord {
     pub id: String,
     pub routine_id: Option<String>,
@@ -44,6 +68,8 @@ pub struct PlanRecord {
     pub duration_override_minutes: Option<u32>,
     pub status: String,
     pub moved_to_ymd: Option<String>,
+    #[serde(default)]
+    pub source: PlanSourceRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -155,6 +181,12 @@ struct PlanRow {
     duration_override_minutes: Option<i64>,
     status: String,
     moved_to_ymd: Option<String>,
+    source_kind: String,
+    source_provider_id: Option<String>,
+    source_calendar_id: Option<String>,
+    source_event_id: Option<String>,
+    source_occurrence_id: Option<String>,
+    source_availability: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -229,6 +261,12 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             duration_override_minutes INTEGER,
             status TEXT NOT NULL,
             moved_to_ymd TEXT,
+            source_kind TEXT NOT NULL DEFAULT 'local',
+            source_provider_id TEXT,
+            source_calendar_id TEXT,
+            source_event_id TEXT,
+            source_occurrence_id TEXT,
+            source_availability TEXT NOT NULL DEFAULT 'present',
             UNIQUE (routine_id, date)
         )",
         "CREATE TABLE IF NOT EXISTS time_entries (
@@ -270,6 +308,27 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), String> {
             .execute(pool)
             .await
             .map_err(|error| format!("Failed to migrate completion schema: {error}"))?;
+    }
+
+    let plan_columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('plans')")
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("Failed to inspect Plan schema: {error}"))?;
+    for (name, definition) in [
+        ("source_kind", "TEXT NOT NULL DEFAULT 'local'"),
+        ("source_provider_id", "TEXT"),
+        ("source_calendar_id", "TEXT"),
+        ("source_event_id", "TEXT"),
+        ("source_occurrence_id", "TEXT"),
+        ("source_availability", "TEXT NOT NULL DEFAULT 'present'"),
+    ] {
+        if !plan_columns.iter().any(|column| column == name) {
+            sqlx::query(&format!("ALTER TABLE plans ADD COLUMN {name} {definition}"))
+                .execute(pool)
+                .await
+                .map_err(|error| format!("Failed to migrate Plan schema: {error}"))?;
+        }
     }
 
     // Existing installations have the original six-column time_entries table.
@@ -436,7 +495,9 @@ pub async fn load_app_data_from_pool(pool: &SqlitePool) -> Result<AppData, Strin
             .collect(),
         plans: sqlx::query_as::<_, PlanRow>(
             "SELECT id, routine_id, date, baseline_duration_minutes,
-                    duration_override_minutes, status, moved_to_ymd
+                    duration_override_minutes, status, moved_to_ymd,
+                    source_kind, source_provider_id, source_calendar_id,
+                    source_event_id, source_occurrence_id, source_availability
              FROM plans ORDER BY date ASC, id ASC",
         )
         .fetch_all(pool)
@@ -517,6 +578,14 @@ fn plan_from_row(row: PlanRow) -> Result<PlanRecord, String> {
             .map_err(|_| "Plan duration override is invalid".to_owned())?,
         status: row.status,
         moved_to_ymd: row.moved_to_ymd,
+        source: PlanSourceRecord {
+            kind: row.source_kind,
+            provider_id: row.source_provider_id,
+            calendar_id: row.source_calendar_id,
+            event_id: row.source_event_id,
+            occurrence_id: row.source_occurrence_id,
+            availability: row.source_availability,
+        },
     })
 }
 
@@ -699,15 +768,23 @@ async fn insert_plan(
     sqlx::query(
         "INSERT INTO plans (
             id, routine_id, date, baseline_duration_minutes,
-            duration_override_minutes, status, moved_to_ymd
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            duration_override_minutes, status, moved_to_ymd,
+            source_kind, source_provider_id, source_calendar_id,
+            source_event_id, source_occurrence_id, source_availability
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             routine_id = excluded.routine_id,
             date = excluded.date,
             baseline_duration_minutes = excluded.baseline_duration_minutes,
             duration_override_minutes = excluded.duration_override_minutes,
             status = excluded.status,
-            moved_to_ymd = excluded.moved_to_ymd",
+            moved_to_ymd = excluded.moved_to_ymd,
+            source_kind = excluded.source_kind,
+            source_provider_id = excluded.source_provider_id,
+            source_calendar_id = excluded.source_calendar_id,
+            source_event_id = excluded.source_event_id,
+            source_occurrence_id = excluded.source_occurrence_id,
+            source_availability = excluded.source_availability",
     )
     .bind(&plan.id)
     .bind(&plan.routine_id)
@@ -716,6 +793,12 @@ async fn insert_plan(
     .bind(plan.duration_override_minutes.map(i64::from))
     .bind(&plan.status)
     .bind(&plan.moved_to_ymd)
+    .bind(&plan.source.kind)
+    .bind(&plan.source.provider_id)
+    .bind(&plan.source.calendar_id)
+    .bind(&plan.source.event_id)
+    .bind(&plan.source.occurrence_id)
+    .bind(&plan.source.availability)
     .execute(&mut **executor)
     .await
     .map(|_| ())
@@ -729,8 +812,10 @@ async fn insert_plan_if_absent(
     sqlx::query(
         "INSERT INTO plans (
             id, routine_id, date, baseline_duration_minutes,
-            duration_override_minutes, status, moved_to_ymd
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            duration_override_minutes, status, moved_to_ymd,
+            source_kind, source_provider_id, source_calendar_id,
+            source_event_id, source_occurrence_id, source_availability
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT DO NOTHING",
     )
     .bind(&plan.id)
@@ -740,6 +825,12 @@ async fn insert_plan_if_absent(
     .bind(plan.duration_override_minutes.map(i64::from))
     .bind(&plan.status)
     .bind(&plan.moved_to_ymd)
+    .bind(&plan.source.kind)
+    .bind(&plan.source.provider_id)
+    .bind(&plan.source.calendar_id)
+    .bind(&plan.source.event_id)
+    .bind(&plan.source.occurrence_id)
+    .bind(&plan.source.availability)
     .execute(&mut **executor)
     .await
     .map(|_| ())
@@ -1164,6 +1255,7 @@ mod tests {
                 duration_override_minutes: None,
                 status: "planned".to_owned(),
                 moved_to_ymd: None,
+                source: PlanSourceRecord::default(),
             }],
             time_entries: vec![TimeEntryRecord {
                 id: "entry-1".to_owned(),
@@ -1538,6 +1630,36 @@ mod tests {
     }
 
     #[test]
+    fn persists_provider_neutral_external_plan_source_identity() {
+        tauri::async_runtime::block_on(async {
+            let pool = test_pool().await;
+            let plan = PlanRecord {
+                id: "external-plan:calendar-provider-event-1".to_owned(),
+                routine_id: None,
+                date: "2026-01-05".to_owned(),
+                baseline_duration_minutes: 45,
+                duration_override_minutes: None,
+                status: "planned".to_owned(),
+                moved_to_ymd: None,
+                source: PlanSourceRecord {
+                    kind: "externalCalendar".to_owned(),
+                    provider_id: Some("calendar-provider".to_owned()),
+                    calendar_id: Some("calendar-1".to_owned()),
+                    event_id: Some("event-1".to_owned()),
+                    occurrence_id: Some("occurrence-1".to_owned()),
+                    availability: "unavailable".to_owned(),
+                },
+            };
+            let mut transaction = pool.begin().await.unwrap();
+            insert_plan(&mut transaction, &plan).await.unwrap();
+            transaction.commit().await.unwrap();
+
+            let loaded = load_app_data_from_pool(&pool).await.unwrap();
+            assert_eq!(loaded.plans, vec![plan]);
+        });
+    }
+
+    #[test]
     fn updating_routine_defaults_does_not_touch_historical_records() {
         tauri::async_runtime::block_on(async {
             let pool = test_pool().await;
@@ -1589,6 +1711,7 @@ mod tests {
                     duration_override_minutes: None,
                     status: "planned".to_owned(),
                     moved_to_ymd: None,
+                    source: PlanSourceRecord::default(),
                 });
                 for entry in &mut expected.time_entries {
                     if entry.task_id == routine_id && entry.date == date {

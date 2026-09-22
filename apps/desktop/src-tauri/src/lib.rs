@@ -1,5 +1,6 @@
 mod bootstrap;
 mod core_commands;
+pub mod external_calendar;
 mod migration;
 mod persistence;
 mod plugins;
