@@ -90,15 +90,15 @@ impl ExternalPlanIdentity {
         let occurrence = self
             .occurrence_id
             .as_deref()
-            .map(|value| format!("1:{}:{}", value.as_bytes().len(), value))
+            .map(|value| format!("1:{}:{}", value.len(), value))
             .unwrap_or_else(|| "0".to_owned());
         format!(
             "external-calendar:{}:{}:{}:{}:{}:{}",
-            self.provider_id.as_bytes().len(),
+            self.provider_id.len(),
             self.provider_id,
-            self.calendar_id.as_bytes().len(),
+            self.calendar_id.len(),
             self.calendar_id,
-            self.event_id.as_bytes().len(),
+            self.event_id.len(),
             self.event_id,
         ) + &format!(":{occurrence}")
     }

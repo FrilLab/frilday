@@ -17,6 +17,14 @@ export type GoogleCalendarViewState = {
   calendars: GoogleCalendarSummary[];
 };
 
+export type GoogleCalendarImportOutput = {
+  importedEventCount: number;
+  skippedEventCount: number;
+  planCount: number;
+  startYmd: string;
+  endYmd: string;
+};
+
 const DISCONNECTED_STATE: GoogleCalendarViewState = {
   clientConfigured: false,
   connected: false,
@@ -44,6 +52,16 @@ export async function connectGoogleCalendar(): Promise<GoogleCalendarViewState> 
 export async function refreshGoogleCalendars(): Promise<GoogleCalendarViewState> {
   requireDesktop();
   return invoke<GoogleCalendarViewState>('google_calendar_refresh_calendars');
+}
+
+export async function importGoogleCalendarEvents(
+  startYmd: string,
+  endYmd: string,
+): Promise<GoogleCalendarImportOutput> {
+  requireDesktop();
+  return invoke<GoogleCalendarImportOutput>('google_calendar_import', {
+    request: { startYmd, endYmd },
+  });
 }
 
 export async function saveGoogleCalendarSelection(

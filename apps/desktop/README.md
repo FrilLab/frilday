@@ -11,6 +11,7 @@ separately as a secondary signal.
 - schedule tasks by weekday
 - track completion separately from spent time
 - run, pause, resume, and finish timers for planned work
+- import selected Google Calendar timed events as date-specific Plans
 - store local data with Tauri-backed SQLite
 - package as a native desktop app
 

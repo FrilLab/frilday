@@ -44,6 +44,7 @@ pub fn run() {
             google_calendar::google_calendar_get_state,
             google_calendar::google_calendar_begin_auth,
             google_calendar::google_calendar_refresh_calendars,
+            google_calendar::google_calendar_import,
             google_calendar::google_calendar_set_selection,
             google_calendar::google_calendar_disconnect
         ])

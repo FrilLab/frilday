@@ -51,6 +51,8 @@ pub struct CompletionOutput {
 pub struct PlanInput {
     id: String,
     routine_id: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
     date: String,
     baseline_duration_minutes: u32,
     duration_override_minutes: Option<u32>,
@@ -81,6 +83,7 @@ pub struct PlanSourceInput {
 pub struct PlanOutput {
     id: String,
     routine_id: Option<String>,
+    title: Option<String>,
     date: String,
     baseline_duration_minutes: u32,
     duration_override_minutes: Option<u32>,
@@ -1054,7 +1057,7 @@ fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
         )?),
         other => return Err(format!("unknown plan status: {other}")),
     };
-    Plan::from_persisted_with_source(
+    Plan::from_persisted_with_source_and_title(
         PlanId::new(input.id.clone()).map_err(|error| error.to_string())?,
         input
             .routine_id
@@ -1062,6 +1065,7 @@ fn plan_from_input(input: &PlanInput) -> Result<Plan, String> {
             .map(RoutineId::new)
             .transpose()
             .map_err(|error| error.to_string())?,
+        input.title.clone(),
         parse_date(&input.date)?,
         baseline_duration,
         duration_override,
@@ -1080,6 +1084,7 @@ fn plan_to_output(plan: &Plan) -> PlanOutput {
     PlanOutput {
         id: plan.id().to_string(),
         routine_id: plan.routine_id().map(ToString::to_string),
+        title: plan.title().map(str::to_owned),
         date: plan.date().to_string(),
         baseline_duration_minutes: plan.baseline_duration().minutes(),
         duration_override_minutes: plan.duration_override().map(PlannedDuration::minutes),

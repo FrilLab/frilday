@@ -48,6 +48,7 @@ type CoreTimeEntryInput = {
 type CorePlanInput = {
   id: string;
   routineId: string | null;
+  title: string | null;
   date: string;
   baselineDurationMinutes: number;
   durationOverrideMinutes: number | null;
@@ -207,6 +208,7 @@ function toCorePlan(plan: Plan): CorePlanInput {
   return {
     id: plan.id,
     routineId: plan.routineId,
+    title: plan.title ?? null,
     date: plan.date,
     baselineDurationMinutes: plan.baselineDurationMinutes,
     durationOverrideMinutes: plan.durationOverrideMinutes,

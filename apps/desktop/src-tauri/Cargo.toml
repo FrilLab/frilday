@@ -19,6 +19,7 @@ tauri-build = { version = "2.5.4", features = [] }
 
 [dependencies]
 base64 = "0.22"
+chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 frilday-core = { path = "../../../crates/frilday-core" }
 rand = "0.9"
 reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "query", "rustls"] }

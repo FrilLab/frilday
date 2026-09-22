@@ -44,6 +44,7 @@ pub enum PlanStatus {
 pub struct Plan {
     id: PlanId,
     routine_id: Option<RoutineId>,
+    title: Option<String>,
     date: LocalDate,
     planned_duration: PlannedDuration,
     duration_override: Option<PlannedDuration>,
@@ -61,6 +62,7 @@ impl Plan {
         Self {
             id,
             routine_id,
+            title: None,
             date,
             planned_duration,
             duration_override: None,
@@ -80,9 +82,23 @@ impl Plan {
         date: LocalDate,
         planned_duration: PlannedDuration,
     ) -> Self {
+        Self::from_external_with_title(identity, None, date, planned_duration)
+    }
+
+    /// Build an imported Plan while retaining the provider's normalized title.
+    ///
+    /// External Plans do not have a FrilDay Routine, so this title is the
+    /// user-facing label for the date-specific intention.
+    pub fn from_external_with_title(
+        identity: ExternalPlanIdentity,
+        title: Option<String>,
+        date: LocalDate,
+        planned_duration: PlannedDuration,
+    ) -> Self {
         Self {
             id: Self::id_for_external_source(&identity),
             routine_id: None,
+            title,
             date,
             planned_duration,
             duration_override: None,
@@ -166,6 +182,30 @@ impl Plan {
         status: PlanStatus,
         source: PlanSource,
     ) -> Result<Self, PlanError> {
+        Self::from_persisted_with_source_and_title(
+            id,
+            routine_id,
+            None,
+            date,
+            baseline_duration,
+            duration_override,
+            status,
+            source,
+        )
+    }
+
+    /// Rehydrate a Plan and its optional user-facing title.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_persisted_with_source_and_title(
+        id: PlanId,
+        routine_id: Option<RoutineId>,
+        title: Option<String>,
+        date: LocalDate,
+        baseline_duration: PlannedDuration,
+        duration_override: Option<PlannedDuration>,
+        status: PlanStatus,
+        source: PlanSource,
+    ) -> Result<Self, PlanError> {
         if source.is_local() && routine_id.is_none() {
             return Err(PlanError::MissingRoutine);
         }
@@ -180,6 +220,7 @@ impl Plan {
         Ok(Self {
             id,
             routine_id,
+            title,
             date,
             planned_duration: baseline_duration,
             duration_override,
@@ -194,6 +235,10 @@ impl Plan {
 
     pub fn routine_id(&self) -> Option<&RoutineId> {
         self.routine_id.as_ref()
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
 
     pub const fn date(&self) -> LocalDate {
@@ -275,7 +320,19 @@ impl Plan {
         date: LocalDate,
         baseline_duration: PlannedDuration,
     ) {
+        self.refresh_external_snapshot_with_title(date, baseline_duration, None);
+    }
+
+    /// Update an imported snapshot, including its normalized title, when it
+    /// has no FrilDay execution history.
+    pub fn refresh_external_snapshot_with_title(
+        &mut self,
+        date: LocalDate,
+        baseline_duration: PlannedDuration,
+        title: Option<String>,
+    ) {
         if self.source.is_external() {
+            self.title = title;
             self.date = date;
             self.planned_duration = baseline_duration;
         }

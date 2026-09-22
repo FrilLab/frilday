@@ -76,11 +76,41 @@ frilday-core: PlanSource / identity / history invariants
 ```
 
 The normalized event contains only opaque provider, calendar, event, and
-optional recurring-occurrence identifiers plus the date and planned duration.
+optional recurring-occurrence identifiers plus the normalized title, date, and
+planned duration. The desktop import command fetches an inclusive date window
+from each selected Google calendar, expands recurring events into
+date-specific occurrences, and atomically reconciles the resulting Plans.
 The core has no Google, OAuth, HTTP, or SDK dependency. Reconciliation uses a
 deterministic source identity to avoid duplicates and retains an unavailable
 Plan when an upstream event disappears so Sessions and Completions remain
 reviewable.
+
+### Google event import semantics
+
+The import convention is deterministic and intentionally small:
+
+- A title beginning with the case-sensitive [frilday] prefix is imported
+  from any selected calendar; the prefix and surrounding whitespace are
+  removed from the Plan title.
+- A selected calendar whose exact display name is FrilDay is a dedicated
+  source; its timed events do not need the prefix. The two mechanisms are
+  alternatives, not a requirement to use both.
+- All-day events, cancelled events, missing/empty titles, malformed times,
+  zero/negative durations, durations above FrilDay's supported 720-minute
+  limit, and events outside the requested inclusive date window are skipped.
+  Calendar dates without a finite timed duration do not become invented
+  24-hour Plans.
+- Timed events crossing midnight use the event's start date and the full
+  elapsed start-to-end duration. Durations are whole minutes, floored from
+  provider timestamps; a result below one minute is skipped.
+- Google recurring instances use the recurring series id plus
+  originalStartTime as the external occurrence identity. They become
+  standalone Plans and never create FrilDay Routines.
+- Re-importing an occurrence updates one deterministic Plan. A Plan with
+  Session or Completion history keeps its prior date, title, and planned
+  duration; no calendar duration is written as actual tracked time.
+- Reconciliation only marks missing Google Plans unavailable inside the
+  requested window. Plans outside that window and local Plans are preserved.
 
 ### Google Calendar connection boundary
 
