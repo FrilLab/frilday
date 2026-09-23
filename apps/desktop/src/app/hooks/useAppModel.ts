@@ -9,6 +9,10 @@ import { useLocale } from '../../i18n/useLocale';
 import { getNotifier } from '../di/notifierDI';
 import { getDailyMemoText } from '../../domain/memo';
 import {
+  externalPlanToTask,
+  isExternalTask,
+} from '../../domain/plan/externalPlan';
+import {
   DEFAULT_DAILY_CAPACITY_MINUTES,
   MAX_DAILY_CAPACITY_MINUTES,
   MIN_DAILY_CAPACITY_MINUTES,
@@ -130,6 +134,18 @@ export function useAppModel() {
   const todayYmd = toYmd(today);
   const todayDow = dayOfWeek(today);
   const weekStartYmd = toYmd(startOfWeekMonday(today));
+
+  const externalTasks = useMemo(
+    () =>
+      plans
+        .map((plan) => externalPlanToTask(plan, t('plan.source.importedEvent')))
+        .filter((task): task is Task => task != null),
+    [plans, t],
+  );
+  const displayTasks = useMemo(
+    () => [...tasks, ...externalTasks],
+    [externalTasks, tasks],
+  );
 
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [activeTimerTaskId, setActiveTimerTaskId] = useState<string | null>(
@@ -260,13 +276,14 @@ export function useAppModel() {
   }, [scheduleSlots, todayYmd]);
 
   const todayTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => {
+    const filtered = displayTasks.filter((t) => {
       const isOpenTimer = openTimerTaskId === t.id;
       // Keep a recovered running or paused timer visible even if its task was
       // archived, so the open session remains controllable.
       if (isOpenTimer) return true;
       if (!t.isActive) return false;
       const todayPlan = visibleToday.get(t.id)?.plan;
+      if (isExternalTask(t) && !todayPlan?.executable) return false;
       return (
         visibleToday.get(t.id)?.visible ?? false
       ) || todayPlan?.status === 'skipped';
@@ -277,7 +294,7 @@ export function useAppModel() {
       if (aDone === bDone) return 0;
       return aDone ? 1 : -1;
     });
-  }, [tasks, openTimerTaskId, visibleToday]);
+  }, [displayTasks, openTimerTaskId, visibleToday]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -308,7 +325,7 @@ export function useAppModel() {
       timeTotals.byTask.map((entry) => [entry.taskId, entry.actualMinutes]),
     );
     const states = new Map<string, TaskDayState>();
-    for (const task of tasks) {
+    for (const task of displayTasks) {
       const visible = visibleToday.get(task.id);
       states.set(task.id, {
         scheduled: visible?.scheduled ?? false,
@@ -322,7 +339,7 @@ export function useAppModel() {
       });
     }
     return states;
-  }, [tasks, timeTotals, visibleToday]);
+  }, [displayTasks, timeTotals, visibleToday]);
 
   const targetReachedTaskIds = useMemo(
     () => new Set(targetReached.map((target) => target.taskId)),
@@ -351,17 +368,17 @@ export function useAppModel() {
 
   const activeTimerTask = useMemo(() => {
     if (openTimerTaskId != null) {
-      const open = tasks.find((task) => task.id === openTimerTaskId);
+      const open = displayTasks.find((task) => task.id === openTimerTaskId);
       if (open) return open;
     }
 
     if (activeTimerTaskId != null) {
-      const selected = tasks.find((task) => task.id === activeTimerTaskId);
+      const selected = displayTasks.find((task) => task.id === activeTimerTaskId);
       if (selected) return selected;
     }
 
     return null;
-  }, [activeTimerTaskId, openTimerTaskId, tasks]);
+  }, [activeTimerTaskId, openTimerTaskId, displayTasks]);
 
   const activeTimerPlan =
     openTimerEntry?.planId != null
@@ -597,6 +614,7 @@ export function useAppModel() {
     hydrated,
     // raw
     tasks,
+    displayTasks,
     completions,
     plans,
     timeEntries,

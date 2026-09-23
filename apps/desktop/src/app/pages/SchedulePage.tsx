@@ -18,6 +18,8 @@ import {
   toYmd,
 } from '../../shared/utils/date';
 import { LocaleContext } from '../../i18n/context';
+import { isExternalTask } from '../../domain/plan/externalPlan';
+import { PlanSourceBadge } from '../../features/plan/components/PlanSourceBadge';
 
 type PlanMutation = (input: {
   taskId: string;
@@ -451,6 +453,7 @@ function DayBudgetCard(props: {
             const isAdjusting = adjustingKey === itemKey;
             const isSkipped = !item.plan.executable;
             const isMoved = item.plan.status === 'moved';
+            const imported = isExternalTask(item.task);
 
             return (
               <article
@@ -465,15 +468,27 @@ function DayBudgetCard(props: {
                 )}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => onOpenTask?.(item.task.id)}
-                      className="max-w-full truncate text-left text-sm font-medium text-zinc-100 hover:text-emerald-200"
-                      aria-label={t('schedule.openRoutine', {
-                        task: item.task.title,
-                      })}>
-                      {item.task.title}
-                    </button>
+                    <span className="flex max-w-full flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => !imported && onOpenTask?.(item.task.id)}
+                        disabled={imported}
+                        className="max-w-full truncate text-left text-sm font-medium text-zinc-100 hover:text-emerald-200 disabled:cursor-default disabled:hover:text-zinc-100"
+                        aria-label={t('schedule.openRoutine', {
+                          task: item.task.title,
+                        })}>
+                        {item.task.title}
+                      </button>
+                      <PlanSourceBadge
+                        source={item.plan.source ?? item.task.source}
+                        unavailable={!item.plan.executable}
+                      />
+                    </span>
+                    {imported && (
+                      <p className="mt-1 text-xs text-sky-200/70">
+                        {t('plan.source.providerOwnedHint')}
+                      </p>
+                    )}
                     <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
                       {!item.task.isActive && (
                         <span className="text-zinc-500">{t('common.archived')}</span>
@@ -521,7 +536,7 @@ function DayBudgetCard(props: {
                     {t('schedule.planDate', { date: item.dateYmd })}
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    {onOpenTask && (
+                    {onOpenTask && !imported && (
                       <button
                         type="button"
                         onClick={() => onOpenTask(item.task.id)}
@@ -529,7 +544,8 @@ function DayBudgetCard(props: {
                         {t('schedule.routine')}
                       </button>
                     )}
-                    {canAdjustDate &&
+                    {!imported &&
+                      canAdjustDate &&
                       (onSetPlanDuration || onSkipPlan || onRestorePlan || onMovePlan) && (
                         <button
                           type="button"
@@ -542,7 +558,8 @@ function DayBudgetCard(props: {
                           {t('schedule.adjustPlan')}
                         </button>
                       )}
-                    {!canAdjustDate &&
+                    {!imported &&
+                      !canAdjustDate &&
                       (onSetPlanDuration || onSkipPlan || onRestorePlan || onMovePlan) && (
                         <span className="rounded-lg border border-zinc-800 px-2 py-1 text-[11px] text-zinc-600">
                           {t('schedule.pastReadOnly')}
@@ -551,7 +568,7 @@ function DayBudgetCard(props: {
                   </div>
                 </div>
 
-                {isAdjusting && canAdjustDate && (
+                {isAdjusting && canAdjustDate && !imported && (
                   <PlanAdjustment
                     item={item}
                     todayYmd={todayYmd}
@@ -622,7 +639,7 @@ export function SchedulePage(props: {
   useEffect(() => {
     let current = true;
     void getVisibleScheduleSlots({
-      tasks,
+      tasks: tasks.filter((task) => !isExternalTask(task)),
       completions,
       plans,
       weekStartYmd: normalizedWeekStartYmd,

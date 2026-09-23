@@ -1,4 +1,4 @@
-import type { Completion, DayOfWeek, Task } from '../../shared/types';
+import type { Completion, DayOfWeek, PlanSource, Task } from '../../shared/types';
 import { WEEK_ORDER } from './scheduleView';
 
 export const DEFAULT_DAILY_CAPACITY_MINUTES = 8 * 60;
@@ -20,6 +20,7 @@ export type WeeklyPlanProjection = {
   effectiveDate: string;
   movedToYmd: string | null;
   executable: boolean;
+  source?: PlanSource;
 };
 
 export type WeeklyScheduleSlot = {

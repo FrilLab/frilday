@@ -2,7 +2,7 @@ use crate::{
     completion::Completion,
     date::LocalDate,
     plan::Plan,
-    planning::{RoutinePlanTarget, resolve_plans},
+    planning::{RoutinePlanTarget, resolve_external_plans, resolve_plans},
     routine::Routine,
     session::Session,
     time::{ActualDuration, PlannedDuration, Timestamp},
@@ -311,6 +311,13 @@ pub fn completion_stats_for_week_with_plans(
         }
     }
 
+    for plan in resolve_external_plans(persisted_plans, week_start, week_end)
+        .into_iter()
+        .filter(|plan| plan.is_executable())
+    {
+        total = add_completion(total, completion_matches_plan(completions, &plan));
+    }
+
     WeeklyCompletionStats {
         week_start,
         total,
@@ -368,6 +375,16 @@ pub fn completion_stats_between_with_plans(
             if completion_matches_plan(completions, &plan) {
                 totals.completed_count = totals.completed_count.saturating_add(1);
             }
+        }
+    }
+
+    for plan in resolve_external_plans(persisted_plans, start, end)
+        .into_iter()
+        .filter(|plan| plan.is_executable())
+    {
+        totals.scheduled_count = totals.scheduled_count.saturating_add(1);
+        if completion_matches_plan(completions, &plan) {
+            totals.completed_count = totals.completed_count.saturating_add(1);
         }
     }
     totals

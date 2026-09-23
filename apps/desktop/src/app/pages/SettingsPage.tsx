@@ -79,6 +79,24 @@ function GoogleCalendarSettings() {
     setError(null);
   };
 
+  const selectionDirty =
+    state != null &&
+    [...selectedCalendarIds].sort().join('\u0000') !==
+      [...state.selectedCalendarIds].sort().join('\u0000');
+
+  const busyLabel =
+    busyAction === 'sync'
+      ? t('settings.googleCalendar.syncing')
+      : busyAction === 'refresh'
+        ? t('settings.googleCalendar.refreshing')
+        : busyAction === 'connect'
+          ? t('settings.googleCalendar.connecting')
+          : busyAction === 'disconnect'
+            ? t('settings.googleCalendar.disconnecting')
+            : busyAction === 'save'
+              ? t('settings.googleCalendar.saving')
+              : null;
+
   const saveSelection = () => {
     if (selectedCalendarIds.length === 0) {
       setError(t('settings.googleCalendar.selectAtLeastOne'));
@@ -194,11 +212,14 @@ function GoogleCalendarSettings() {
                 disabled={
                   busyAction !== null ||
                   !state.connected ||
-                  selectedCalendarIds.length === 0
+                  selectedCalendarIds.length === 0 ||
+                  selectionDirty
                 }
                 onClick={() => void syncNow()}
                 className="h-9 rounded-xl border border-sky-300/30 bg-sky-300/10 px-3 text-sm text-sky-100 hover:bg-sky-300/20 disabled:cursor-not-allowed disabled:opacity-50">
-                {t('settings.googleCalendar.syncNow')}
+                {busyAction === 'sync'
+                  ? t('settings.googleCalendar.syncing')
+                  : t('settings.googleCalendar.syncNow')}
               </button>
               <button
                 type="button"
@@ -264,12 +285,17 @@ function GoogleCalendarSettings() {
             </p>
           )}
 
-          {(state.lastSyncAt || state.lastSyncError) && (
+          {(state.lastSyncAt || state.lastSyncError || state.connected) && (
             <div className="space-y-1 text-xs">
               {state.lastSyncAt && (
                 <p className="text-zinc-500">
                   {t('settings.googleCalendar.lastSync')}{' '}
                   {new Date(state.lastSyncAt).toLocaleString()}
+                </p>
+              )}
+              {!state.lastSyncAt && state.connected && !state.lastSyncError && (
+                <p className="text-zinc-500">
+                  {t('settings.googleCalendar.neverSynced')}
                 </p>
               )}
               {state.lastSyncError && (
@@ -285,6 +311,11 @@ function GoogleCalendarSettings() {
       {error && (
         <p className="mt-3 text-sm text-rose-300" role="alert">
           {error}
+        </p>
+      )}
+      {busyLabel && (
+        <p className="mt-3 text-sm text-sky-200" aria-live="polite">
+          {busyLabel}
         </p>
       )}
       {notice && <p className="mt-3 text-sm text-emerald-300">{notice}</p>}

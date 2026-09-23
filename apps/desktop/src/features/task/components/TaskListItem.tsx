@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { LocaleContext } from '../../../i18n/context';
+import { isExternalTask } from '../../../domain/plan/externalPlan';
+import { PlanSourceBadge } from '../../plan/components/PlanSourceBadge';
 
 interface TaskListItemProps {
   task: Task; // (role: task item, type: Task)
@@ -95,6 +97,7 @@ export function TaskListItem(props: TaskListItemProps) {
   const doneToday = taskDayState?.completed ?? false;
   const skippedToday = taskDayState?.planStatus === 'skipped';
   const movedToday = taskDayState?.planStatus === 'moved';
+  const imported = isExternalTask(task);
 
   // (role: safe description string, type: string)
   const description = (task.description ?? '').trim();
@@ -301,6 +304,11 @@ export function TaskListItem(props: TaskListItemProps) {
               {task.title}
             </div>
 
+            <PlanSourceBadge
+              source={task.source}
+              unavailable={task.source?.availability === 'unavailable'}
+            />
+
             {variant === 'manage' && (
               <span className="rounded-full border border-zinc-800 bg-zinc-900/40 px-2 py-0.5 text-xs text-zinc-300">
                 {tr('task.recurrence')}: {categoryLabel}
@@ -319,6 +327,12 @@ export function TaskListItem(props: TaskListItemProps) {
               </span>
             )}
           </div>
+
+          {variant === 'today' && imported && (
+            <p className="mt-2 text-xs text-sky-200/70">
+              {tr('plan.source.providerOwnedHint')}
+            </p>
+          )}
 
           {description && variant === 'manage' && (
             <p className="mt-1 truncate text-xs text-zinc-400">{description}</p>
@@ -398,7 +412,8 @@ export function TaskListItem(props: TaskListItemProps) {
 
             {variant === 'today' &&
               (scheduledToday || skippedToday) &&
-              onSetPlanDuration && (
+              onSetPlanDuration &&
+              !imported && (
               <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-950/50 p-2">
                 <span className="text-xs text-zinc-400">{tr('task.todayPlan')}</span>
                 <input

@@ -17,6 +17,9 @@ export interface TaskBase {
   occurrenceLimit?: number | null; // (role: lifetime occurrence limit, type: number | null | undefined)
   isActive: boolean; // (role: archive flag, type: boolean)
   createdAt: string; // (role: ISO timestamp, type: string)
+  // Synthetic external tasks use this view-only source marker. Persisted local
+  // routines leave it undefined.
+  source?: PlanSource;
 }
 
 // (role: unified task type, type: alias)
